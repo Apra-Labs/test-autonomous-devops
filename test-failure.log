@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "/private/tmp/test-autonomous-devops/test-failure-scenario.py", line 5, in <module>
+    result = datetime.now()
+NameError: name 'datetime' is not defined
