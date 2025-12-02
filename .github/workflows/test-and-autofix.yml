@@ -45,7 +45,6 @@ jobs:
             cat ../test-output.log
             exit 1
           }
-        continue-on-error: true
 
       - name: Save test output
         if: always()
