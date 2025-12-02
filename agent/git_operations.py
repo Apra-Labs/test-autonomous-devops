@@ -287,11 +287,13 @@ Attempt: {attempt}
 
         try:
             origin = self.git_repo.remote('origin')
-            push_args = [f"HEAD:{branch_name}"]
-            if force:
-                push_args.append('--force')
+            refspec = f"HEAD:refs/heads/{branch_name}"
 
-            origin.push(*push_args)
+            if force:
+                origin.push(refspec, force=True)
+            else:
+                origin.push(refspec)
+
             logger.info(f"Pushed {branch_name} to remote")
             return True
 
