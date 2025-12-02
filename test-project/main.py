@@ -1,24 +1,26 @@
-"""
-Simple Python application for testing autonomous agent
-"""
+import json
 from datetime import datetime
 
 def calculate_age(birth_year):
-    """Calculate age from birth year"""
     current_year = datetime.now().year
     return current_year - birth_year
 
+def greet(name):
+    return f"Hello, {name}!"
+
 def format_greeting(name, birth_year):
-    """Format a greeting with age"""
     age = calculate_age(birth_year)
-    # BUG: Missing import for json module
+    greeting = greet(name)
+    
+    # Format as JSON
     data = json.dumps({
-        "name": name,
+        "greeting": greeting,
         "age": age,
-        "timestamp": datetime.now().isoformat()
+        "name": name
     })
     return data
 
 if __name__ == "__main__":
+    print("Testing the application...")
     result = format_greeting("Test User", 1990)
     print(result)
