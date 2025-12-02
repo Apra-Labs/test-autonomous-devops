@@ -1,0 +1,9 @@
+Building test project...
+Running: python main.py
+Traceback (most recent call last):
+  File "main.py", line 6, in <module>
+    print(datetime.now())
+NameError: name 'datetime' is not defined
+
+ERROR: Build failed with exit code 1
+Build duration: 0.5 seconds
