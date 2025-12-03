@@ -187,6 +187,10 @@ class AgentConfig:
     ENABLE_PR_CREATION = True
     ENABLE_SKILL_UPDATES = True
 
+    # Multi-flavor coordination (cost optimization)
+    ENABLE_FLAVOR_COORDINATION = True  # Avoid duplicate LLM analysis across flavors
+    MAX_COORDINATION_WAIT_MINUTES = 15  # Max time to wait for another flavor's fix
+
     # Logging
     VERBOSE = True
     LOG_FILE = "agent.log"

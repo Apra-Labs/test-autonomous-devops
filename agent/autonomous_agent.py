@@ -25,12 +25,14 @@ try:
     from .git_operations import GitOperations
     from .log_extractor import SmartLogExtractor
     from .context_fetcher import ContextFetcher
+    from .coordination import FlavorCoordinator, CoordinationConfig
 except ImportError:
     from config import AgentConfig, DEFAULT_CONFIG
     from llm_client import LLMClient
     from git_operations import GitOperations
     from log_extractor import SmartLogExtractor
     from context_fetcher import ContextFetcher
+    from coordination import FlavorCoordinator, CoordinationConfig
 
 # Configure logging
 logging.basicConfig(
@@ -44,7 +46,7 @@ logger = logging.getLogger(__name__)
 class AgentResult:
     """Result from agent execution"""
     success: bool
-    action_taken: str  # 'first_failure', 'retry', 'pr_created', 'do_nothing', 'escalated', 'stopped'
+    action_taken: str  # 'first_failure', 'retry', 'pr_created', 'do_nothing', 'escalated', 'stopped', 'coordination_skip'
     attempt: int
     model_used: str
     confidence: float = 0.0
@@ -53,6 +55,7 @@ class AgentResult:
     branch_name: Optional[str] = None
     skill_updated: bool = False
     error_message: Optional[str] = None
+    coordination_issue: Optional[int] = None  # GitHub issue number for coordination
 
     def to_dict(self) -> Dict:
         """Convert to dictionary"""
@@ -271,6 +274,46 @@ class AutonomousAgent:
         error_context = self.log_extractor.extract_relevant_error(failure_log, platform="unknown")
 
         logger.info(f"Extracted {error_context['excerpt_lines']} lines, type: {error_context['error_type']}")
+
+        # COORDINATION CHECK: Avoid duplicate LLM analysis across flavors
+        if CoordinationConfig.ENABLED and not self.mock_mode:
+            flavor = os.getenv('BUILD_FLAVOR', 'unknown')
+            github_repo = os.getenv('GITHUB_REPOSITORY', '')
+
+            if flavor != 'unknown' and github_repo:
+                coordinator = FlavorCoordinator(
+                    github_client=self.git,
+                    repo=github_repo,
+                    commit_sha=self.context_fetcher.commit_sha or 'unknown'
+                )
+
+                # Generate error signature for deduplication
+                error_signature = coordinator.generate_error_signature(
+                    error_context.get('error_excerpt', '')
+                )
+
+                # Check if we should analyze
+                coordination = coordinator.should_analyze(flavor, error_signature)
+
+                if not coordination['should_analyze']:
+                    reason = coordination['reason']
+                    logger.info(f"⏭️  Skipping LLM analysis: {reason}")
+
+                    if reason == 'fix_in_progress':
+                        wait_branch = coordination.get('wait_for_branch')
+                        logger.info(f"Waiting for fix from branch: {wait_branch}")
+                        # TODO: Could wait and retry after fix is pushed
+
+                    return AgentResult(
+                        success=True,
+                        action_taken='coordination_skip',
+                        attempt=0,
+                        model_used='none',
+                        fix_description=f"Skipped: {reason} (cost saving!)",
+                        coordination_issue=coordination.get('issue_number')
+                    )
+
+                logger.info(f"✅ Proceeding with analysis: {coordination['reason']}")
 
         # Use iterative investigation to analyze failure
         llm_response = self.llm.investigate_failure_iteratively(
