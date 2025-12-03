@@ -80,25 +80,32 @@ class AutonomousAgent:
     Analyzes build failures and attempts to fix them automatically.
     """
 
-    def __init__(self, config: Optional[AgentConfig] = None, mock_mode: bool = False):
+    def __init__(self, config: Optional[AgentConfig] = None, mock_mode: bool = False,
+                 mock_llm: bool = None, mock_git: bool = None):
         """
         Initialize agent
 
         Args:
             config: Agent configuration
-            mock_mode: If True, use mock clients (no real API/Git calls)
+            mock_mode: If True, use mock clients (no real API/Git calls) - DEPRECATED, use mock_llm and mock_git
+            mock_llm: If True, mock LLM API calls (overrides mock_mode for LLM)
+            mock_git: If True, mock Git operations (overrides mock_mode for Git)
         """
         self.config = config or DEFAULT_CONFIG
-        self.mock_mode = mock_mode
+        self.mock_mode = mock_mode  # Keep for backward compatibility
+
+        # Allow separate control of LLM vs Git mocking
+        self.mock_llm = mock_llm if mock_llm is not None else mock_mode
+        self.mock_git = mock_git if mock_git is not None else mock_mode
 
         # Initialize clients
-        api_key = os.getenv('ANTHROPIC_API_KEY') if not mock_mode else None
-        github_token = os.getenv('GITHUB_TOKEN') if not mock_mode else None
-        github_repo = os.getenv('GITHUB_REPOSITORY') if not mock_mode else None
+        api_key = os.getenv('ANTHROPIC_API_KEY') if not self.mock_llm else None
+        github_token = os.getenv('GITHUB_TOKEN') if not self.mock_git else None
+        github_repo = os.getenv('GITHUB_REPOSITORY') if not self.mock_git else None
 
         self.llm = LLMClient(
             api_key=api_key,
-            mock_mode=mock_mode,
+            mock_mode=self.mock_llm,
             config=self.config.model
         )
 
@@ -106,7 +113,7 @@ class AutonomousAgent:
             repo_path=".",
             github_token=github_token,
             github_repo=github_repo,
-            mock_mode=mock_mode,
+            mock_mode=self.mock_git,
             config=self.config.git
         )
 
@@ -276,7 +283,9 @@ class AutonomousAgent:
         logger.info(f"Extracted {error_context['excerpt_lines']} lines, type: {error_context['error_type']}")
 
         # COORDINATION CHECK: Avoid duplicate LLM analysis across flavors
-        if CoordinationConfig.ENABLED and not self.mock_mode:
+        # Note: Coordination uses GitHub API, so we only skip it if git_operations is in mock mode
+        # LLM can be mocked while still using real GitHub API for coordination testing
+        if CoordinationConfig.ENABLED and not self.git.mock_mode:
             flavor = os.getenv('BUILD_FLAVOR', 'unknown')
             github_repo = os.getenv('GITHUB_REPOSITORY', '')
 
@@ -767,13 +776,33 @@ def main():
     parser.add_argument(
         '--mock-mode',
         action='store_true',
-        help='Run in mock mode (no real API/Git calls)'
+        help='Run in mock mode (both LLM and Git) - same as --mock-llm --mock-git'
+    )
+
+    parser.add_argument(
+        '--mock-llm',
+        action='store_true',
+        help='Mock LLM API calls only (allows testing coordination with real GitHub)'
+    )
+
+    parser.add_argument(
+        '--mock-git',
+        action='store_true',
+        help='Mock Git operations only'
     )
 
     args = parser.parse_args()
 
-    # Initialize agent
-    agent = AutonomousAgent(mock_mode=args.mock_mode)
+    # Initialize agent with separate mock controls
+    # If --mock-mode is set, it overrides individual flags
+    mock_llm = args.mock_llm if not args.mock_mode else True
+    mock_git = args.mock_git if not args.mock_mode else True
+
+    agent = AutonomousAgent(
+        mock_mode=args.mock_mode,
+        mock_llm=mock_llm,
+        mock_git=mock_git
+    )
 
     # Run agent
     result = agent.run(
