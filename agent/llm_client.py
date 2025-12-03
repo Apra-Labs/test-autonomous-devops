@@ -556,6 +556,237 @@ Applied fix after {attempt_count} attempt(s). The final changeset resolves the i
                 'next_steps': ['Debug manually']
             }
 
+    def investigate_failure_iteratively(self,
+                                       error_context: Dict,
+                                       previous_attempts: List[Dict],
+                                       context_fetcher,
+                                       attempt: int,
+                                       max_turns: int = 5) -> LLMResponse:
+        """
+        Iteratively investigate failure by requesting context as needed
+
+        Args:
+            error_context: Initial error context from log extractor
+            previous_attempts: List of previous fix attempts
+            context_fetcher: ContextFetcher instance to fetch files/logs
+            attempt: Current attempt number
+            max_turns: Maximum investigation turns
+
+        Returns:
+            LLMResponse with final fix proposal
+        """
+        model = self.config.get_model_for_attempt(attempt)
+        logger.info(f"Starting iterative investigation with {model} (max {max_turns} turns)")
+
+        conversation_history = []
+        total_tokens = 0
+
+        for turn in range(1, max_turns + 1):
+            logger.info(f"Investigation turn {turn}/{max_turns}")
+
+            # Build prompt with current context
+            prompt = self._build_investigation_prompt(
+                error_context=error_context,
+                previous_attempts=previous_attempts,
+                conversation_history=conversation_history,
+                turn=turn
+            )
+
+            # Call LLM
+            if self.mock_mode:
+                response_json = self._mock_investigation_response(turn, max_turns)
+                tokens = 1000
+            else:
+                template = self.prompts['investigate_failure']
+                response = self.client.messages.create(
+                    model=model,
+                    max_tokens=self.config.MAX_TOKENS_PER_TURN,
+                    temperature=self.config.TEMPERATURE,
+                    system=template['system'],
+                    messages=[{"role": "user", "content": prompt}]
+                )
+
+                response_text = response.content[0].text
+                tokens = response.usage.input_tokens + response.usage.output_tokens
+                total_tokens += tokens
+
+                # Parse JSON response
+                response_json = self._parse_json_response(response_text)
+
+            logger.info(f"Turn {turn}: Action={response_json.get('action')}, Tokens={tokens}")
+
+            # Check if LLM wants to propose fix
+            if response_json.get('action') == 'propose_fix':
+                confidence = response_json.get('confidence', 0.0)
+                logger.info(f"LLM proposes fix with confidence {confidence}")
+
+                if confidence >= self.config.MIN_FIX_CONFIDENCE:
+                    # Confidence high enough, return fix
+                    return LLMResponse(
+                        analysis=response_json.get('analysis', {}),
+                        fix=response_json.get('fix', {}),
+                        skill_update={'needs_update': False},
+                        raw_response=str(response_json),
+                        model_used=model,
+                        tokens_used=total_tokens
+                    )
+                else:
+                    logger.warning(f"Confidence {confidence} below threshold {self.config.MIN_FIX_CONFIDENCE}")
+                    # Force another turn to get more context
+                    response_json['action'] = 'need_more_context'
+                    if 'requests' not in response_json or not response_json['requests']:
+                        response_json['requests'] = [{
+                            'type': 'file',
+                            'target': 'any relevant file',
+                            'reason': 'Need more context to increase confidence'
+                        }]
+
+            # LLM needs more context
+            if response_json.get('action') == 'need_more_context':
+                requests = response_json.get('requests', [])
+
+                if not requests:
+                    logger.warning("No requests provided, ending investigation")
+                    break
+
+                # Fetch requested context
+                fulfilled = context_fetcher.fetch_requests(requests)
+
+                # Add to conversation history
+                conversation_history.append({
+                    'turn': turn,
+                    'llm_reasoning': response_json.get('reasoning', ''),
+                    'requests': requests,
+                    'fulfilled': fulfilled
+                })
+
+                # Check token budget
+                if total_tokens > self.config.MAX_TOTAL_TOKENS:
+                    logger.warning(f"Token budget exceeded: {total_tokens} > {self.config.MAX_TOTAL_TOKENS}")
+                    break
+            else:
+                logger.warning(f"Unexpected action: {response_json.get('action')}")
+                break
+
+        # Reached max turns or budget - force best guess
+        logger.warning(f"Investigation ended after {turn} turns, forcing best guess")
+        return self._force_best_guess(model, error_context, conversation_history)
+
+    def _build_investigation_prompt(self, error_context: Dict, previous_attempts: List[Dict],
+                                   conversation_history: List[Dict], turn: int) -> str:
+        """Build prompt for investigation turn"""
+        template = self.prompts['investigate_failure']
+
+        # Format conversation history
+        if not conversation_history:
+            history_text = "*(This is the first investigation turn)*"
+        else:
+            history_parts = []
+            for entry in conversation_history:
+                t = entry['turn']
+                reasoning = entry['llm_reasoning']
+                fulfilled = entry['fulfilled']
+
+                history_parts.append(f"## Turn {t}")
+                history_parts.append(f"**LLM Reasoning:** {reasoning}\n")
+
+                from context_fetcher import ContextFetcher
+                fetcher = ContextFetcher('.')  # Dummy instance for formatting
+                history_parts.append(fetcher.format_fulfilled_requests(fulfilled))
+
+            history_text = "\n\n".join(history_parts)
+
+        # Format previous attempts
+        if not previous_attempts:
+            attempts_text = "*(No previous attempts)*"
+        else:
+            attempts_text = "\n\n".join([
+                f"### Attempt {i+1}\n{att.get('summary', 'No summary')}"
+                for i, att in enumerate(previous_attempts)
+            ])
+
+        # Build prompt
+        prompt = template['user_template'].format(
+            platform=error_context.get('metadata', {}).get('platform', 'unknown'),
+            context_type=error_context.get('context_type', 'unknown'),
+            error_type=error_context.get('error_type', 'unknown'),
+            metadata=error_context.get('metadata', ''),
+            error_excerpt=error_context.get('error_excerpt', ''),
+            conversation_history=history_text,
+            previous_attempts=attempts_text
+        )
+
+        return prompt
+
+    def _mock_investigation_response(self, turn: int, max_turns: int) -> Dict:
+        """Generate mock investigation response for testing"""
+        if turn < 2:
+            # First turn - request files
+            return {
+                'action': 'need_more_context',
+                'requests': [{
+                    'type': 'file',
+                    'target': 'test-project/main.py',
+                    'reason': 'Need to see the failing code'
+                }],
+                'reasoning': 'Error traceback shows issue in main.py, need to see the code'
+            }
+        else:
+            # Second turn - propose fix
+            return {
+                'action': 'propose_fix',
+                'confidence': 0.90,
+                'analysis': {
+                    'root_cause': 'Missing import statement',
+                    'reasoning': 'Error shows json module not imported'
+                },
+                'fix': {
+                    'description': 'Add missing import',
+                    'files_to_change': [{
+                        'path': 'test-project/main.py',
+                        'action': 'edit',
+                        'old_content': 'from datetime import datetime',
+                        'new_content': 'from datetime import datetime\nimport json'
+                    }]
+                }
+            }
+
+    def _parse_json_response(self, response_text: str) -> Dict:
+        """Parse JSON from LLM response"""
+        try:
+            if '```json' in response_text:
+                import re
+                pattern = r'```json\s*(\{.*?\})\s*```'
+                match = re.search(pattern, response_text, re.DOTALL)
+                if match:
+                    return json.loads(match.group(1))
+            return json.loads(response_text)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse LLM response JSON: {e}")
+            return {'action': 'error', 'error': str(e)}
+
+    def _force_best_guess(self, model: str, error_context: Dict,
+                         conversation_history: List[Dict]) -> LLMResponse:
+        """Force LLM to make best guess when turns/budget exhausted"""
+        logger.warning("Forcing best guess from accumulated context")
+
+        # Use mock response for now
+        return LLMResponse(
+            analysis={
+                'root_cause': 'Unable to determine with high confidence',
+                'reasoning': 'Investigation budget exhausted',
+                'confidence': 0.50
+            },
+            fix={
+                'description': 'Unable to propose fix',
+                'files_to_change': []
+            },
+            skill_update={'needs_update': False},
+            raw_response='Budget exhausted',
+            model_used=model,
+            tokens_used=0
+        )
+
 
 class MockLLMClient(LLMClient):
     """Convenience class for mock client"""

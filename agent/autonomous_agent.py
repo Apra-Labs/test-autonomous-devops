@@ -23,10 +23,14 @@ try:
     from .config import AgentConfig, DEFAULT_CONFIG
     from .llm_client import LLMClient
     from .git_operations import GitOperations
+    from .log_extractor import SmartLogExtractor
+    from .context_fetcher import ContextFetcher
 except ImportError:
     from config import AgentConfig, DEFAULT_CONFIG
     from llm_client import LLMClient
     from git_operations import GitOperations
+    from log_extractor import SmartLogExtractor
+    from context_fetcher import ContextFetcher
 
 # Configure logging
 logging.basicConfig(
@@ -101,6 +105,16 @@ class AutonomousAgent:
             github_repo=github_repo,
             mock_mode=mock_mode,
             config=self.config.git
+        )
+
+        # Initialize new components for iterative investigation
+        self.log_extractor = SmartLogExtractor(
+            max_excerpt_lines=self.config.model.MAX_LOG_EXCERPT_LINES
+        )
+
+        self.context_fetcher = ContextFetcher(
+            repo_root=".",
+            max_file_size=self.config.model.MAX_FILE_SIZE_BYTES
         )
 
     def run(self, branch: str, build_status: str, failure_log: Optional[str] = None) -> AgentResult:
@@ -240,21 +254,21 @@ class AutonomousAgent:
         # Generate fix ID (use timestamp or workflow run ID)
         fix_id = os.getenv('GITHUB_RUN_ID', f"local-{int(os.times().elapsed * 1000)}")
 
-        # Parse failure log
-        failure_context = self._parse_failure_log(failure_log, "unknown")
+        # Extract error context from log using smart extractor
+        error_context = self.log_extractor.extract_relevant_error(failure_log, platform="unknown")
 
-        # Load skill knowledge
-        skill_knowledge = self._load_skill_knowledge()
+        logger.info(f"Extracted {error_context['excerpt_lines']} lines, type: {error_context['error_type']}")
 
-        # Ask LLM for fix (attempt 1)
-        llm_response = self.llm.analyze_failure(
-            failure_context=failure_context,
+        # Use iterative investigation to analyze failure
+        llm_response = self.llm.investigate_failure_iteratively(
+            error_context=error_context,
             previous_attempts=[],
-            skill_knowledge=skill_knowledge,
-            attempt=1
+            context_fetcher=self.context_fetcher,
+            attempt=1,
+            max_turns=self.config.model.MAX_INVESTIGATION_TURNS
         )
 
-        logger.info(f"LLM Analysis complete (confidence: {llm_response.analysis['confidence']:.2f})")
+        logger.info(f"Investigation complete (confidence: {llm_response.analysis.get('confidence', 0):.2f})")
 
         # Create branch
         branch_info = self.git.create_fix_branch(fix_id, attempt=1, base_branch=branch)
@@ -324,21 +338,21 @@ class AutonomousAgent:
         # Load previous attempts
         previous_attempts = self._load_previous_attempts(fix_id)
 
-        # Parse failure log
-        failure_context = self._parse_failure_log(failure_log, "unknown")
+        # Extract error context from log using smart extractor
+        error_context = self.log_extractor.extract_relevant_error(failure_log, platform="unknown")
 
-        # Load skill knowledge
-        skill_knowledge = self._load_skill_knowledge()
+        logger.info(f"Extracted {error_context['excerpt_lines']} lines, type: {error_context['error_type']}")
 
-        # Ask LLM (with appropriate model for attempt number)
-        llm_response = self.llm.analyze_failure(
-            failure_context=failure_context,
+        # Use iterative investigation to analyze failure
+        llm_response = self.llm.investigate_failure_iteratively(
+            error_context=error_context,
             previous_attempts=previous_attempts,
-            skill_knowledge=skill_knowledge,
-            attempt=next_attempt
+            context_fetcher=self.context_fetcher,
+            attempt=next_attempt,
+            max_turns=self.config.model.MAX_INVESTIGATION_TURNS
         )
 
-        logger.info(f"LLM Analysis complete (confidence: {llm_response.analysis['confidence']:.2f})")
+        logger.info(f"Investigation complete (confidence: {llm_response.analysis.get('confidence', 0):.2f})")
         logger.info(f"Model used: {llm_response.model_used}")
 
         # Apply fix

@@ -22,6 +22,16 @@ class ModelConfig:
     MAX_TOKENS = 8192
     TEMPERATURE = 0.0  # Deterministic for consistency
 
+    # Iterative investigation parameters
+    MAX_INVESTIGATION_TURNS = 5  # Max back-and-forth turns for context building
+    MAX_TOKENS_PER_TURN = 10000  # Max tokens per LLM response
+    MAX_TOTAL_TOKENS = 50000  # Max tokens across all turns (~$0.50 on Sonnet)
+    MIN_FIX_CONFIDENCE = 0.85  # Minimum confidence to apply fix
+    MAX_FILE_SIZE_BYTES = 100000  # Don't send files > 100KB
+    MAX_LOG_EXCERPT_LINES = 2000  # Max lines per log excerpt
+    COST_PER_INPUT_TOKEN = 0.000003  # Sonnet input cost
+    MAX_COST_PER_ATTEMPT = 0.50  # Max $0.50 per fix attempt
+
     def get_model_for_attempt(self, attempt: int) -> str:
         """
         Get appropriate model based on attempt number
