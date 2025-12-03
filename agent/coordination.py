@@ -106,6 +106,29 @@ class FlavorCoordinator:
             logger.info(f"First flavor to fail, creating coordination issue")
             issue = self._create_coordination_issue(flavor, error_signature)
 
+            # Double-check: Did someone else create one at the same time with a lower number?
+            # Wait a moment for API to settle, then check again
+            time.sleep(1)
+            existing_issue = self._find_coordination_issue()
+
+            if existing_issue and existing_issue['number'] < issue['number']:
+                logger.info(f"Found lower-numbered issue #{existing_issue['number']}, we were not actually first")
+                # Close our duplicate issue
+                try:
+                    if hasattr(self.github_repo, 'get_issue'):
+                        our_issue = self.github_repo.get_issue(issue['number'])
+                        our_issue.edit(state='closed')
+                        our_issue.create_comment(f"Duplicate of #{existing_issue['number']}")
+                except Exception as e:
+                    logger.error(f"Failed to close duplicate issue: {e}")
+
+                # Treat like we found an existing issue
+                return {
+                    'should_analyze': False,
+                    'reason': 'duplicate_coordination',
+                    'issue_number': existing_issue['number']
+                }
+
             return {
                 'should_analyze': True,
                 'reason': 'first_flavor',
@@ -113,31 +136,41 @@ class FlavorCoordinator:
             }
 
     def _find_coordination_issue(self) -> Optional[Dict]:
-        """Find existing coordination issue for this commit"""
+        """Find existing coordination issue for this commit
+
+        Retries with small delays to handle GitHub API eventual consistency.
+        """
         try:
-            # Use Repository.get_issues() instead of search API to avoid indexing delays
-            # Search for open issues with coordination label and commit SHA in title
+            # Use Repository.get_issues() instead of search API
+            # Try multiple times with small delays to handle API lag
             if hasattr(self.github_repo, 'get_issues'):
-                # Get open issues with coordination label
-                issues = self.github_repo.get_issues(
-                    state='open',
-                    labels=[self.coordination_label]
-                )
-
-                # Filter for our commit SHA in title
                 commit_prefix = self.commit_sha[:8]
-                for issue in issues:
-                    if commit_prefix in issue.title:
-                        logger.info(f"Found existing coordination issue: #{issue.number}")
-                        # Convert to dict for easier handling
-                        return {
-                            'number': issue.number,
-                            'title': issue.title,
-                            'body': issue.body,
-                            'url': issue.html_url
-                        }
 
-                logger.info(f"No coordination issue found for commit {self.commit_sha[:8]}")
+                # Try up to 3 times with increasing delays
+                for attempt in range(3):
+                    # Get open issues with coordination label
+                    issues = self.github_repo.get_issues(
+                        state='open',
+                        labels=[self.coordination_label]
+                    )
+
+                    # Filter for our commit SHA in title
+                    for issue in issues:
+                        if commit_prefix in issue.title:
+                            logger.info(f"Found existing coordination issue: #{issue.number} (attempt {attempt+1})")
+                            # Convert to dict for easier handling
+                            return {
+                                'number': issue.number,
+                                'title': issue.title,
+                                'body': issue.body,
+                                'url': issue.html_url
+                            }
+
+                    # If not found and not last attempt, wait a bit
+                    if attempt < 2:
+                        time.sleep(0.5 * (attempt + 1))  # 0.5s, then 1s
+
+                logger.info(f"No coordination issue found for commit {self.commit_sha[:8]} after 3 attempts")
                 return None
             else:
                 # Fallback for testing
