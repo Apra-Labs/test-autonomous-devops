@@ -491,21 +491,45 @@ class AutonomousAgent:
     # Helper methods
 
     def _parse_failure_log(self, log_path: str, platform: str) -> Dict:
-        """Parse failure log into context"""
+        """Parse failure log into context with full traceback"""
         if not log_path or not Path(log_path).exists():
-            return {'platform': platform, 'errors': ['No log file available']}
+            return {
+                'platform': platform,
+                'errors': ['No log file available'],
+                'log_excerpt': '',
+                'phase': 'unknown'
+            }
 
         content = Path(log_path).read_text()
 
-        # Extract error lines
-        errors = []
+        # Extract full traceback if present
+        traceback_lines = []
+        in_traceback = False
         for line in content.split('\n'):
-            if any(keyword in line for keyword in ['ERROR', 'Error', 'FAILED', 'Failed', 'Traceback']):
-                errors.append(line)
+            if 'Traceback' in line:
+                in_traceback = True
+            if in_traceback:
+                traceback_lines.append(line)
+                # Stop at the error message
+                if line and not line.startswith(' ') and 'Error' in line:
+                    break
+
+        # If we have a traceback, use that as the primary error
+        if traceback_lines:
+            error_text = '\n'.join(traceback_lines)
+        else:
+            # Otherwise extract error lines
+            error_lines = []
+            for line in content.split('\n'):
+                if any(keyword in line for keyword in ['ERROR', 'Error', 'FAILED', 'Failed']):
+                    error_lines.append(line)
+            error_text = '\n'.join(error_lines[:20])
 
         return {
             'platform': platform,
-            'errors': errors[:50]  # Limit to 50 error lines
+            'errors': error_text,
+            'log_excerpt': content[-2000:],  # Last 2000 chars of log
+            'phase': 'test'  # For now, assume test phase
         }
 
     def _load_skill_knowledge(self) -> str:
