@@ -597,7 +597,13 @@ index 1234567..abcdefg 100644
 """
 
         try:
-            diff = self.git_repo.git.diff(f'{base}...{branch}')
+            # Try with origin/ prefix first (for CI environments where main might not be local)
+            try:
+                diff = self.git_repo.git.diff(f'origin/{base}...{branch}')
+            except:
+                # Fall back to local branch
+                diff = self.git_repo.git.diff(f'{base}...{branch}')
+
             logger.info(f"Diff size: {len(diff)} bytes")
             return diff
         except Exception as e:

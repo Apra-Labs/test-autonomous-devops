@@ -412,7 +412,7 @@ class AutonomousAgent:
         pr = self.git.create_pull_request(
             title=pr_summary['title'],
             body=pr_summary['body'],
-            head=branch_name,
+            branch=branch_name,
             base='main',
             labels=[self.config.git.format_attempt_label(fix_id, attempt_count)]
         )
