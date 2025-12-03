@@ -13,6 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    outputs:
+      test-result: ${{ steps.test.outcome }}
 
     steps:
       - name: Checkout code
@@ -66,19 +68,19 @@ jobs:
         id: precheck
         run: |
           BRANCH="${GITHUB_REF#refs/heads/}"
-          BUILD_STATUS="${{ needs.build-test.result }}"
+          TEST_RESULT="${{ needs.build-test.outputs.test-result }}"
 
           echo "Branch: $BRANCH"
-          echo "Build status: $BUILD_STATUS"
+          echo "Test result: $TEST_RESULT"
 
           # CASE 4: Success on non-fix branch = do nothing
-          if [[ ! "$BRANCH" =~ ^autonomous-fix- ]] && [[ "$BUILD_STATUS" == "success" ]]; then
-            echo "CASE 4: Build passed on non-fix branch - nothing to do"
+          if [[ ! "$BRANCH" =~ ^autonomous-fix- ]] && [[ "$TEST_RESULT" == "success" ]]; then
+            echo "CASE 4: Tests passed on non-fix branch - nothing to do"
             echo "action=skip" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          echo "Need to run agent"
+          echo "Need to run agent (tests failed or on fix branch)"
           echo "action=run" >> $GITHUB_OUTPUT
 
       - name: Checkout code
@@ -99,7 +101,7 @@ jobs:
         run: pip install anthropic PyGithub gitpython pyyaml
 
       - name: Download test logs
-        if: steps.precheck.outputs.action == 'run' && needs.build-test.result == 'failure'
+        if: steps.precheck.outputs.action == 'run' && needs.build-test.outputs.test-result == 'failure'
         uses: actions/download-artifact@v4
         with:
           name: test-logs
@@ -119,7 +121,14 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           BRANCH="${GITHUB_REF#refs/heads/}"
-          BUILD_STATUS="${{ needs.build-test.result }}"
+          TEST_RESULT="${{ needs.build-test.outputs.test-result }}"
+
+          # Map test outcome to build status
+          if [ "$TEST_RESULT" == "success" ]; then
+            BUILD_STATUS="success"
+          else
+            BUILD_STATUS="failure"
+          fi
 
           # Prepare failure log argument
           FAILURE_LOG_ARG=""
@@ -129,6 +138,7 @@ jobs:
 
           echo "=== Running Autonomous Agent ==="
           echo "Branch: $BRANCH"
+          echo "Test result: $TEST_RESULT"
           echo "Build Status: $BUILD_STATUS"
 
           python agent/autonomous_agent.py \
