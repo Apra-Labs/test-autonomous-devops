@@ -145,7 +145,8 @@ jobs:
             --branch "$BRANCH" \
             --build-status "$BUILD_STATUS" \
             $FAILURE_LOG_ARG \
-            --output agent-result.json
+            --output agent-result.json \
+            --mock
 
       - name: Upload agent result
         if: always() && steps.precheck.outputs.action == 'run'

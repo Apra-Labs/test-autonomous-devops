@@ -122,15 +122,18 @@ class LLMClient:
                                     skill_knowledge, attempt)
 
         if self.mock_mode:
+            logger.info("🔸 MOCK MODE: Using simulated LLM response (NO API CALL)")
             return self._mock_response(attempt, model)
 
         # Real API call
+        logger.warning(f"💰 REAL API CALL: Calling Anthropic API with model {model} - THIS COSTS MONEY!")
         response = self.client.messages.create(
             model=model,
             max_tokens=self.config.MAX_TOKENS,
             temperature=self.config.TEMPERATURE,
             messages=[{"role": "user", "content": prompt}]
         )
+        logger.warning(f"💰 API CALL COMPLETE: Used {response.usage.input_tokens + response.usage.output_tokens} tokens")
 
         # Parse response
         parsed = self._parse_response(response.content[0].text)
@@ -601,9 +604,11 @@ Applied fix after {attempt_count} attempt(s). The final changeset resolves the i
 
             # Call LLM
             if self.mock_mode:
+                logger.info("🔸 MOCK MODE: Using simulated LLM response (NO API CALL)")
                 response_json = self._mock_investigation_response(turn, max_turns)
                 tokens = 1000
             else:
+                logger.warning(f"💰 REAL API CALL: Calling Anthropic API with model {model} - THIS COSTS MONEY!")
                 template = self.prompts['investigate_failure']
                 response = self.client.messages.create(
                     model=model,
@@ -612,6 +617,7 @@ Applied fix after {attempt_count} attempt(s). The final changeset resolves the i
                     system=template['system'],
                     messages=[{"role": "user", "content": prompt}]
                 )
+                logger.warning(f"💰 API CALL COMPLETE: Used {response.usage.input_tokens + response.usage.output_tokens} tokens")
 
                 response_text = response.content[0].text
                 tokens = response.usage.input_tokens + response.usage.output_tokens
