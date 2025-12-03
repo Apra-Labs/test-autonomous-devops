@@ -257,8 +257,8 @@ class AutonomousAgent:
         logger.info(f"LLM Analysis complete (confidence: {llm_response.analysis['confidence']:.2f})")
 
         # Create branch
-        branch_name = self.config.git.format_branch_name(fix_id)
-        self.git.create_branch(branch_name, from_branch=branch)
+        branch_info = self.git.create_fix_branch(fix_id, attempt=1, base_branch=branch)
+        branch_name = branch_info.name
 
         # Apply fix
         change_results = self.git.apply_file_changes(llm_response.fix['files_to_change'])
