@@ -1,5 +1,0 @@
-{
-  "name": "test-project",
-  "version": "1.0.0"
-  "description": "Missing comma above causes syntax error"
-}

@@ -1,4 +1,0 @@
-Traceback (most recent call last):
-  File "main.py", line 1, in <module>
-    from utils.validator import validate_input
-ModuleNotFoundError: No module named 'utils.validator'
