@@ -168,7 +168,8 @@ class SmartLogExtractor:
             "error_excerpt": content,
             "context_type": context_type,
             "error_type": error_type,
-            "metadata": self._format_metadata(metadata),
+            "metadata_dict": metadata,  # Keep dict for programmatic access
+            "metadata": self._format_metadata(metadata),  # Formatted string for prompt
             "excerpt_lines": len(content.splitlines())
         }
 

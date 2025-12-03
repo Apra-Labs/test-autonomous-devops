@@ -706,8 +706,9 @@ Applied fix after {attempt_count} attempt(s). The final changeset resolves the i
             ])
 
         # Build prompt
+        metadata_dict = error_context.get('metadata_dict', {})
         prompt = template['user_template'].format(
-            platform=error_context.get('metadata', {}).get('platform', 'unknown'),
+            platform=metadata_dict.get('platform', 'unknown'),
             context_type=error_context.get('context_type', 'unknown'),
             error_type=error_context.get('error_type', 'unknown'),
             metadata=error_context.get('metadata', ''),
