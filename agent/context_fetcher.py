@@ -6,6 +6,7 @@ Fetches files, log excerpts, and git history as requested by LLM.
 import logging
 import os
 import subprocess
+import urllib.request
 from typing import Dict, List, Optional
 from pathlib import Path
 
@@ -17,16 +18,21 @@ class ContextFetcher:
     Fetches requested context (files, logs, git history) for LLM investigation
     """
 
-    def __init__(self, repo_root: str, max_file_size: int = 100000):
+    def __init__(self, repo_root: str, max_file_size: int = 100000,
+                 github_repo: Optional[str] = None, commit_sha: Optional[str] = None):
         """
         Initialize context fetcher
 
         Args:
             repo_root: Root directory of git repository
             max_file_size: Maximum file size in bytes to fetch
+            github_repo: GitHub repository (e.g., "Apra-Labs/ApraPipes")
+            commit_sha: Current commit SHA for fetching from GitHub
         """
         self.repo_root = Path(repo_root)
         self.max_file_size = max_file_size
+        self.github_repo = github_repo
+        self.commit_sha = commit_sha
 
     def fetch_requests(self, requests: List[Dict]) -> List[Dict]:
         """
@@ -49,6 +55,8 @@ class ContextFetcher:
 
             if req_type == 'file':
                 result = self._fetch_file(target, reason)
+            elif req_type == 'github_raw':
+                result = self._fetch_github_raw(target, reason)
             elif req_type == 'log_excerpt':
                 result = self._fetch_log_excerpt(target, reason)
             elif req_type == 'git_log':
@@ -144,6 +152,67 @@ class ContextFetcher:
                 'reason': reason,
                 'status': 'error',
                 'content': f"Error reading file: {e}"
+            }
+
+    def _fetch_github_raw(self, url_or_path: str, reason: str) -> Dict:
+        """
+        Fetch file from GitHub raw URL
+
+        Args:
+            url_or_path: Full GitHub raw URL or just the file path
+            reason: Why LLM needs this file
+
+        Returns:
+            Dict with file content or error
+        """
+        # If it's just a path, construct the full URL
+        if not url_or_path.startswith('http'):
+            if not self.github_repo or not self.commit_sha:
+                return {
+                    'type': 'github_raw',
+                    'target': url_or_path,
+                    'reason': reason,
+                    'status': 'error',
+                    'content': 'GitHub repo or commit SHA not configured'
+                }
+            url = f"https://raw.githubusercontent.com/{self.github_repo}/{self.commit_sha}/{url_or_path}"
+        else:
+            url = url_or_path
+
+        try:
+            logger.info(f"Fetching from GitHub: {url}")
+
+            # Fetch with timeout
+            with urllib.request.urlopen(url, timeout=10) as response:
+                content = response.read().decode('utf-8')
+
+            return {
+                'type': 'github_raw',
+                'target': url_or_path,
+                'reason': reason,
+                'status': 'success',
+                'content': content,
+                'metadata': {
+                    'url': url,
+                    'size_bytes': len(content),
+                    'lines': len(content.splitlines())
+                }
+            }
+        except urllib.error.HTTPError as e:
+            return {
+                'type': 'github_raw',
+                'target': url_or_path,
+                'reason': reason,
+                'status': 'not_found' if e.code == 404 else 'error',
+                'content': f"HTTP {e.code}: {e.reason}"
+            }
+        except Exception as e:
+            return {
+                'type': 'github_raw',
+                'target': url_or_path,
+                'reason': reason,
+                'status': 'error',
+                'content': f"Error fetching from GitHub: {e}"
             }
 
     def _fetch_log_excerpt(self, search_term: str, reason: str) -> Dict:

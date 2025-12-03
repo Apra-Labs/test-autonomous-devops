@@ -159,7 +159,11 @@ class GitOperations:
         for change in file_changes:
             path = change['path']
             action = change['action']
-            content = change.get('content', '')
+
+            # Support both old and new formats
+            # Old: action='edit', content='...'
+            # New: action='replace', new_content='...'
+            content = change.get('new_content') or change.get('content', '')
 
             logger.info(f"Applying {action} to {path}")
 
@@ -175,11 +179,15 @@ class GitOperations:
             try:
                 file_path = self.repo_path / path
 
-                if action == 'create' or action == 'edit':
+                if action in ['create', 'edit', 'replace']:
                     # Create parent directories if needed
                     file_path.parent.mkdir(parents=True, exist_ok=True)
+
+                    # Write complete file content
                     file_path.write_text(content)
                     self.git_repo.git.add(path)
+
+                    logger.info(f"Replaced entire file {path} ({len(content)} bytes)")
 
                 elif action == 'delete':
                     if file_path.exists():

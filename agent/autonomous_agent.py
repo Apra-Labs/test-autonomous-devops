@@ -112,9 +112,22 @@ class AutonomousAgent:
             max_excerpt_lines=self.config.model.MAX_LOG_EXCERPT_LINES
         )
 
+        # Get current commit SHA for GitHub fetching
+        try:
+            import subprocess
+            commit_sha = subprocess.check_output(
+                ['git', 'rev-parse', 'HEAD'],
+                cwd='.',
+                text=True
+            ).strip()
+        except:
+            commit_sha = None
+
         self.context_fetcher = ContextFetcher(
             repo_root=".",
-            max_file_size=self.config.model.MAX_FILE_SIZE_BYTES
+            max_file_size=self.config.model.MAX_FILE_SIZE_BYTES,
+            github_repo=github_repo,
+            commit_sha=commit_sha
         )
 
     def run(self, branch: str, build_status: str, failure_log: Optional[str] = None) -> AgentResult:
@@ -265,7 +278,10 @@ class AutonomousAgent:
             previous_attempts=[],
             context_fetcher=self.context_fetcher,
             attempt=1,
-            max_turns=self.config.model.MAX_INVESTIGATION_TURNS
+            max_turns=self.config.model.MAX_INVESTIGATION_TURNS,
+            github_repo=os.getenv('GITHUB_REPOSITORY', ''),
+            branch=branch,
+            commit_sha=self.context_fetcher.commit_sha or ''
         )
 
         logger.info(f"Investigation complete (confidence: {llm_response.analysis.get('confidence', 0):.2f})")
@@ -343,13 +359,22 @@ class AutonomousAgent:
 
         logger.info(f"Extracted {error_context['excerpt_lines']} lines, type: {error_context['error_type']}")
 
+        # Get current branch name for GitHub context
+        try:
+            current_branch = self.git.git_repo.active_branch.name
+        except:
+            current_branch = self.config.git.format_branch_name(fix_id)
+
         # Use iterative investigation to analyze failure
         llm_response = self.llm.investigate_failure_iteratively(
             error_context=error_context,
             previous_attempts=previous_attempts,
             context_fetcher=self.context_fetcher,
             attempt=next_attempt,
-            max_turns=self.config.model.MAX_INVESTIGATION_TURNS
+            max_turns=self.config.model.MAX_INVESTIGATION_TURNS,
+            github_repo=os.getenv('GITHUB_REPOSITORY', ''),
+            branch=current_branch,
+            commit_sha=self.context_fetcher.commit_sha or ''
         )
 
         logger.info(f"Investigation complete (confidence: {llm_response.analysis.get('confidence', 0):.2f})")

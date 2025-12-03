@@ -561,7 +561,10 @@ Applied fix after {attempt_count} attempt(s). The final changeset resolves the i
                                        previous_attempts: List[Dict],
                                        context_fetcher,
                                        attempt: int,
-                                       max_turns: int = 5) -> LLMResponse:
+                                       max_turns: int = 5,
+                                       github_repo: str = '',
+                                       branch: str = '',
+                                       commit_sha: str = '') -> LLMResponse:
         """
         Iteratively investigate failure by requesting context as needed
 
@@ -589,7 +592,10 @@ Applied fix after {attempt_count} attempt(s). The final changeset resolves the i
                 error_context=error_context,
                 previous_attempts=previous_attempts,
                 conversation_history=conversation_history,
-                turn=turn
+                turn=turn,
+                github_repo=github_repo,
+                branch=branch,
+                commit_sha=commit_sha
             )
 
             # Call LLM
@@ -673,7 +679,8 @@ Applied fix after {attempt_count} attempt(s). The final changeset resolves the i
         return self._force_best_guess(model, error_context, conversation_history)
 
     def _build_investigation_prompt(self, error_context: Dict, previous_attempts: List[Dict],
-                                   conversation_history: List[Dict], turn: int) -> str:
+                                   conversation_history: List[Dict], turn: int,
+                                   github_repo: str = '', branch: str = '', commit_sha: str = '') -> str:
         """Build prompt for investigation turn"""
         template = self.prompts['investigate_failure']
 
@@ -708,6 +715,9 @@ Applied fix after {attempt_count} attempt(s). The final changeset resolves the i
         # Build prompt
         metadata_dict = error_context.get('metadata_dict', {})
         prompt = template['user_template'].format(
+            github_repo=github_repo or 'unknown',
+            branch=branch or 'unknown',
+            commit_sha=commit_sha or 'unknown',
             platform=metadata_dict.get('platform', 'unknown'),
             context_type=error_context.get('context_type', 'unknown'),
             error_type=error_context.get('error_type', 'unknown'),
@@ -733,7 +743,7 @@ Applied fix after {attempt_count} attempt(s). The final changeset resolves the i
                 'reasoning': 'Error traceback shows issue in main.py, need to see the code'
             }
         else:
-            # Second turn - propose fix
+            # Second turn - propose fix with COMPLETE file content
             return {
                 'action': 'propose_fix',
                 'confidence': 0.90,
@@ -742,12 +752,36 @@ Applied fix after {attempt_count} attempt(s). The final changeset resolves the i
                     'reasoning': 'Error shows json module not imported'
                 },
                 'fix': {
-                    'description': 'Add missing import',
+                    'description': 'Add missing json import to fix the error',
                     'files_to_change': [{
                         'path': 'test-project/main.py',
-                        'action': 'edit',
-                        'old_content': 'from datetime import datetime',
-                        'new_content': 'from datetime import datetime\nimport json'
+                        'action': 'replace',
+                        'new_content': '''"""
+Test Scenario 3: Simple 2-bug scenario for CASE 2 testing
+
+BUG 1: Missing json import (will fail first)
+BUG 2: Undefined variable (will fail after BUG 1 is fixed)
+"""
+from datetime import datetime
+import json
+
+def format_user_data(name, birth_year):
+    """Format user data as JSON"""
+    current_year = datetime.now().year
+    age = current_year - birth_year
+
+    data = json.dumps({
+        "name": name,
+        "age": age,
+        "timestamp": datetime.now().isoformat(),
+        "status": "active"  # Fixed: was user_status
+    })
+    return data
+
+if __name__ == "__main__":
+    result = format_user_data("Test User", 1990)
+    print(result)
+'''
                     }]
                 }
             }
