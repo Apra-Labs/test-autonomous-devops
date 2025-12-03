@@ -2,29 +2,21 @@ name: Test and Auto-Fix
 
 on:
   push:
-    branches: [main, 'test-*', 'autonomous-fix-*']
-  pull_request:
-    branches: [main]
+    branches: ['**']  # Trigger on ALL branches
   workflow_dispatch:
-    inputs:
-      force_attempt:
-        description: 'Force specific attempt number (1-7)'
-        required: false
-        type: number
 
 permissions:
   contents: read
 
 jobs:
-  build-and-test:
+  build-test:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -40,17 +32,15 @@ jobs:
         id: test
         run: |
           cd test-project
-          python test_main.py > ../test-output.log 2>&1 || {
-            echo "Tests failed"
-            cat ../test-output.log
-            exit 1
-          }
+          python test_main.py > ../test-output.log 2>&1
+        continue-on-error: true
 
-      - name: Save test output
-        if: always()
+      - name: Check test result
         run: |
-          if [ -f test-output.log ]; then
-            echo "Test output saved"
+          if [ ${{ steps.test.outcome }} == 'success' ]; then
+            echo "Tests passed"
+          else
+            echo "Tests failed"
             cat test-output.log
           fi
 
@@ -61,15 +51,9 @@ jobs:
           name: test-logs
           path: test-output.log
 
-      - name: Check test result
-        if: steps.test.outcome == 'failure'
-        run: |
-          echo "BUILD_FAILED=true" >> $GITHUB_ENV
-          echo "Tests failed - will trigger autonomous fix"
-
   autonomous-fix:
-    needs: build-and-test
-    if: failure() && github.event_name == 'push'
+    needs: build-test
+    if: always()  # ALWAYS run, even if build passes
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -77,83 +61,93 @@ jobs:
       issues: write
 
     steps:
+      # CASE 4 optimization: Quick check before checkout
+      - name: Pre-check (CASE 4 early exit)
+        id: precheck
+        run: |
+          BRANCH="${GITHUB_REF#refs/heads/}"
+          BUILD_STATUS="${{ needs.build-test.result }}"
+
+          echo "Branch: $BRANCH"
+          echo "Build status: $BUILD_STATUS"
+
+          # CASE 4: Success on non-fix branch = do nothing
+          if [[ ! "$BRANCH" =~ ^autonomous-fix- ]] && [[ "$BUILD_STATUS" == "success" ]]; then
+            echo "CASE 4: Build passed on non-fix branch - nothing to do"
+            echo "action=skip" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "Need to run agent"
+          echo "action=run" >> $GITHUB_OUTPUT
+
       - name: Checkout code
+        if: steps.precheck.outputs.action == 'run'
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 0  # Need full history to detect attempts
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
+        if: steps.precheck.outputs.action == 'run'
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
 
       - name: Install agent dependencies
-        run: |
-          pip install anthropic PyGithub gitpython pyyaml
+        if: steps.precheck.outputs.action == 'run'
+        run: pip install anthropic PyGithub gitpython pyyaml
 
       - name: Download test logs
+        if: steps.precheck.outputs.action == 'run' && needs.build-test.result == 'failure'
         uses: actions/download-artifact@v4
         with:
           name: test-logs
           path: .
 
       - name: Configure git
+        if: steps.precheck.outputs.action == 'run'
         run: |
           git config user.name "Autonomous Agent"
           git config user.email "autonomous-agent@apra.ai"
 
-      - name: Detect attempt number
-        id: attempt
-        run: |
-          # Check if we're on an autonomous-fix branch
-          CURRENT_BRANCH="${GITHUB_REF#refs/heads/}"
-          echo "Current branch: $CURRENT_BRANCH"
-
-          if [[ "$CURRENT_BRANCH" =~ ^autonomous-fix-(.+)/attempt-([0-9]+)$ ]]; then
-            FIX_ID="${BASH_REMATCH[1]}"
-            PREV_ATTEMPT="${BASH_REMATCH[2]}"
-            ATTEMPT=$((PREV_ATTEMPT + 1))
-            echo "Continuing fix sequence: $FIX_ID, attempt $ATTEMPT"
-          else
-            FIX_ID="${GITHUB_RUN_ID}"
-            ATTEMPT=1
-            echo "Starting new fix sequence: $FIX_ID, attempt 1"
-          fi
-
-          # Allow manual override
-          if [ -n "${{ github.event.inputs.force_attempt }}" ]; then
-            ATTEMPT="${{ github.event.inputs.force_attempt }}"
-            echo "Force override to attempt: $ATTEMPT"
-          fi
-
-          echo "fix_id=$FIX_ID" >> $GITHUB_OUTPUT
-          echo "attempt=$ATTEMPT" >> $GITHUB_OUTPUT
-
       - name: Run autonomous agent
+        if: steps.precheck.outputs.action == 'run'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
+          BRANCH="${GITHUB_REF#refs/heads/}"
+          BUILD_STATUS="${{ needs.build-test.result }}"
+
+          # Prepare failure log argument
+          FAILURE_LOG_ARG=""
+          if [ -f "test-output.log" ]; then
+            FAILURE_LOG_ARG="--failure-log test-output.log"
+          fi
+
+          echo "=== Running Autonomous Agent ==="
+          echo "Branch: $BRANCH"
+          echo "Build Status: $BUILD_STATUS"
+
           python agent/autonomous_agent.py \
-            --failure-log test-output.log \
-            --fix-id "${{ steps.attempt.outputs.fix_id }}" \
-            --platform "python" \
-            --attempt "${{ steps.attempt.outputs.attempt }}" \
+            --branch "$BRANCH" \
+            --build-status "$BUILD_STATUS" \
+            $FAILURE_LOG_ARG \
             --output agent-result.json
 
       - name: Upload agent result
-        if: always()
+        if: always() && steps.precheck.outputs.action == 'run'
         uses: actions/upload-artifact@v4
         with:
-          name: agent-result-attempt-${{ steps.attempt.outputs.attempt }}
+          name: agent-result
           path: agent-result.json
 
       - name: Display result
-        if: always()
+        if: always() && steps.precheck.outputs.action == 'run'
         run: |
           if [ -f agent-result.json ]; then
             echo "=== Agent Result ==="
-            cat agent-result.json
+            cat agent-result.json | python -m json.tool || cat agent-result.json
           fi

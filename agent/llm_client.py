@@ -5,6 +5,7 @@ Handles interaction with Anthropic Claude models with mock support for testing.
 """
 import json
 import logging
+import os
 from typing import Dict, Optional, List
 from dataclasses import dataclass
 
@@ -42,7 +43,7 @@ class LLMClient:
     """
 
     def __init__(self, api_key: Optional[str] = None, mock_mode: bool = False,
-                 config: Optional[ModelConfig] = None):
+                 config: Optional[ModelConfig] = None, prompts_path: Optional[str] = None):
         """
         Initialize LLM client
 
@@ -50,9 +51,19 @@ class LLMClient:
             api_key: Anthropic API key (required if not in mock mode)
             mock_mode: If True, return mock responses without API calls
             config: Model configuration
+            prompts_path: Path to prompts.json file (defaults to agent/prompts.json)
         """
         self.mock_mode = mock_mode
         self.config = config or ModelConfig()
+
+        # Load prompts from JSON file
+        if prompts_path is None:
+            # Auto-detect prompts.json location
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            prompts_path = os.path.join(script_dir, 'prompts.json')
+
+        self.prompts = self._load_prompts(prompts_path)
+        logger.info(f"Loaded prompts from {prompts_path}")
 
         if not mock_mode:
             if not api_key:
@@ -63,6 +74,28 @@ class LLMClient:
         else:
             self.client = None
             logger.info("LLM Client initialized in MOCK MODE")
+
+    def _load_prompts(self, path: str) -> Dict:
+        """
+        Load prompt templates from JSON file
+
+        Args:
+            path: Path to prompts.json file
+
+        Returns:
+            Dictionary of prompt templates
+        """
+        try:
+            with open(path, 'r') as f:
+                prompts = json.load(f)
+                logger.info(f"Loaded {len(prompts)} prompt templates")
+                return prompts
+        except FileNotFoundError:
+            logger.error(f"Prompts file not found: {path}")
+            raise
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in prompts file: {e}")
+            raise
 
     def analyze_failure(self,
                        failure_context: Dict,
@@ -352,6 +385,176 @@ You are now Claude Opus - use your advanced reasoning to solve this harder probl
             model_used=model,
             tokens_used=1000  # Mock token count
         )
+
+    def summarize_for_pr(self,
+                        original_error: str,
+                        final_diff: str,
+                        attempt_count: int,
+                        platform: str) -> Dict:
+        """
+        CASE 3: Create human-friendly PR summary
+
+        Called when build passes on autonomous-fix branch.
+        LLM creates a clear explanation of the original problem and final solution.
+
+        Args:
+            original_error: The original build error from attempt 1
+            final_diff: Git diff of all changes from main to fix branch
+            attempt_count: Number of attempts it took
+            platform: Platform where build failed
+
+        Returns:
+            Dictionary with 'title' and 'body' for PR
+        """
+        logger.info(f"Creating PR summary (attempt count: {attempt_count})")
+
+        if self.mock_mode:
+            return {
+                'title': f'Fix {platform} build failure after {attempt_count} attempt(s)',
+                'body': f'''## Problem
+
+{original_error[:200]}...
+
+## Solution
+
+Applied fix after {attempt_count} attempt(s). The final changeset resolves the issue.
+
+## Changes
+
+```diff
+{final_diff[:500]}...
+```
+
+**Mock PR summary - real LLM would provide detailed explanation**
+'''
+            }
+
+        # Use prompts.json template
+        template = self.prompts['summarize_for_pr']
+
+        prompt = template['user_template'].format(
+            original_error=original_error,
+            final_diff=final_diff,
+            attempt_count=attempt_count,
+            platform=platform
+        )
+
+        # Always use Sonnet for summaries (fast and capable)
+        response = self.client.messages.create(
+            model=self.config.SONNET_MODEL,
+            max_tokens=4096,
+            temperature=0.0,
+            system=template['system'],
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        # Parse JSON response
+        response_text = response.content[0].text
+        try:
+            # Extract JSON from response
+            if '```json' in response_text:
+                import re
+                pattern = r'```json\s*(\{.*?\})\s*```'
+                match = re.search(pattern, response_text, re.DOTALL)
+                if match:
+                    return json.loads(match.group(1))
+            return json.loads(response_text)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse PR summary JSON: {e}")
+            # Fallback to basic summary
+            return {
+                'title': f'Fix {platform} build failure',
+                'body': f'Original error:\n\n```\n{original_error[:500]}\n```\n\nResolved after {attempt_count} attempts.'
+            }
+
+    def create_escalation_summary(self,
+                                  original_error: str,
+                                  all_attempts: List[Dict],
+                                  attempt_count: int) -> Dict:
+        """
+        CASE 5: Summarize failures for human
+
+        Called when agent exhausts all attempts (7+).
+        LLM analyzes what was tried and suggests next steps for human.
+
+        Args:
+            original_error: The original build error
+            all_attempts: List of all fix attempts with details
+            attempt_count: Total number of attempts made
+
+        Returns:
+            Dictionary with escalation summary
+        """
+        logger.warning(f"Creating escalation summary after {attempt_count} failed attempts")
+
+        if self.mock_mode:
+            return {
+                'summary': f'Autonomous agent attempted {attempt_count} fixes but could not resolve the issue.',
+                'patterns': [
+                    'Multiple import-related fixes attempted',
+                    'Dependency installation issues persist'
+                ],
+                'suggested_investigation': [
+                    'Check environment configuration',
+                    'Verify Python version compatibility',
+                    'Review platform-specific requirements'
+                ],
+                'next_steps': [
+                    'Manual debugging required',
+                    'Consider consulting platform documentation',
+                    'May require custom environment setup'
+                ]
+            }
+
+        # Use prompts.json template
+        template = self.prompts['escalation_summary']
+
+        # Format all attempts for prompt
+        attempts_text = ""
+        for i, attempt in enumerate(all_attempts, 1):
+            attempts_text += f"""
+### Attempt {i}
+**Model:** {attempt.get('model_used', 'Unknown')}
+**Fix Applied:** {attempt.get('fix_description', 'No description')}
+**Reasoning:** {attempt.get('reasoning', 'No reasoning')}
+**Result:** FAILED
+
+"""
+
+        prompt = template['user_template'].format(
+            original_error=original_error,
+            all_attempts=attempts_text,
+            attempt_count=attempt_count
+        )
+
+        # Use Opus for escalation analysis (more sophisticated)
+        response = self.client.messages.create(
+            model=self.config.OPUS_MODEL,
+            max_tokens=4096,
+            temperature=0.0,
+            system=template['system'],
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        # Parse JSON response
+        response_text = response.content[0].text
+        try:
+            if '```json' in response_text:
+                import re
+                pattern = r'```json\s*(\{.*?\})\s*```'
+                match = re.search(pattern, response_text, re.DOTALL)
+                if match:
+                    return json.loads(match.group(1))
+            return json.loads(response_text)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse escalation summary JSON: {e}")
+            # Fallback
+            return {
+                'summary': f'{attempt_count} automated fix attempts failed',
+                'patterns': ['Unable to analyze'],
+                'suggested_investigation': ['Manual review required'],
+                'next_steps': ['Debug manually']
+            }
 
 
 class MockLLMClient(LLMClient):

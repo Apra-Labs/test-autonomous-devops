@@ -1,5 +1,7 @@
 """
-Simple Python application for testing autonomous agent
+Simple Python application for testing autonomous agent - Test Scenario 1
+
+BUG: Missing json import (simple fix, should work in 1 attempt)
 """
 from datetime import datetime
 
@@ -11,7 +13,7 @@ def calculate_age(birth_year):
 def format_greeting(name, birth_year):
     """Format a greeting with age"""
     age = calculate_age(birth_year)
-    # BUG: Missing import for json module
+    # BUG: Missing import for json module (agent should fix this easily)
     data = json.dumps({
         "name": name,
         "age": age,
