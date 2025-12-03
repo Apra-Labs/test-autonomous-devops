@@ -768,40 +768,46 @@ Applied fix after {attempt_count} attempt(s). The final changeset resolves the i
             # Second turn - propose fix with COMPLETE file content
             return {
                 'action': 'propose_fix',
-                'confidence': 0.90,
+                'confidence': 0.90,  # Used by investigate_failure_iteratively
                 'analysis': {
                     'root_cause': 'Missing import statement',
-                    'reasoning': 'Error shows json module not imported'
+                    'reasoning': 'Error shows json module not imported',
+                    'confidence': 0.90  # Also in analysis for commit formatting
                 },
                 'fix': {
                     'description': 'Add missing json import to fix the error',
+                    'reasoning': 'Error shows json module not imported but is used in the code',
                     'files_to_change': [{
                         'path': 'test-project/main.py',
                         'action': 'replace',
                         'new_content': '''"""
-Test Scenario 3: Simple 2-bug scenario for CASE 2 testing
+Simple test module for autonomous agent testing
 
-BUG 1: Missing json import (will fail first)
-BUG 2: Undefined variable (will fail after BUG 1 is fixed)
+FIXED: Added json import
 """
 from datetime import datetime
 import json
 
-def format_user_data(name, birth_year):
-    """Format user data as JSON"""
+def calculate_age(birth_year):
+    """Calculate age from birth year"""
     current_year = datetime.now().year
     age = current_year - birth_year
+    return age
 
+def format_greeting(name, birth_year):
+    """Format a greeting with age"""
+    age = calculate_age(birth_year)
+
+    # Fixed: json module now imported
     data = json.dumps({
-        "name": name,
+        "greeting": f"Hello {name}!",
         "age": age,
-        "timestamp": datetime.now().isoformat(),
-        "status": "active"  # Fixed: was user_status
+        "message": f"You are {age} years old"
     })
     return data
 
 if __name__ == "__main__":
-    result = format_user_data("Test User", 1990)
+    result = format_greeting("Test User", 1990)
     print(result)
 '''
                     }]
