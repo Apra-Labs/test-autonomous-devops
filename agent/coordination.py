@@ -111,23 +111,30 @@ class FlavorCoordinator:
             time.sleep(1)
             existing_issue = self._find_coordination_issue()
 
-            if existing_issue and existing_issue['number'] < issue['number']:
-                logger.info(f"Found lower-numbered issue #{existing_issue['number']}, we were not actually first")
-                # Close our duplicate issue
-                try:
-                    if hasattr(self.github_repo, 'get_issue'):
-                        our_issue = self.github_repo.get_issue(issue['number'])
-                        our_issue.edit(state='closed')
-                        our_issue.create_comment(f"Duplicate of #{existing_issue['number']}")
-                except Exception as e:
-                    logger.error(f"Failed to close duplicate issue: {e}")
+            # If we found an issue and it's NOT ours, check the number
+            if existing_issue and existing_issue['number'] != issue['number']:
+                if existing_issue['number'] < issue['number']:
+                    logger.info(f"Found lower-numbered issue #{existing_issue['number']}, we were not actually first")
+                    # Close our duplicate issue
+                    try:
+                        if hasattr(self.github_repo, 'get_issue'):
+                            our_issue = self.github_repo.get_issue(issue['number'])
+                            our_issue.edit(state='closed')
+                            our_issue.create_comment(f"Duplicate of #{existing_issue['number']}")
+                            logger.info(f"Closed our duplicate issue #{issue['number']}")
+                    except Exception as e:
+                        logger.error(f"Failed to close duplicate issue: {e}")
 
-                # Treat like we found an existing issue
-                return {
-                    'should_analyze': False,
-                    'reason': 'duplicate_coordination',
-                    'issue_number': existing_issue['number']
-                }
+                    # Treat like we found an existing issue
+                    return {
+                        'should_analyze': False,
+                        'reason': 'duplicate_coordination',
+                        'issue_number': existing_issue['number']
+                    }
+                else:
+                    logger.info(f"Found higher-numbered issue #{existing_issue['number']}, we were first")
+            else:
+                logger.info(f"Double-check confirmed we're first (issue #{issue['number']})")
 
             return {
                 'should_analyze': True,
