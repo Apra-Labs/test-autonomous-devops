@@ -1,0 +1,20 @@
+# Since the exact file path is not provided in the error log, we need to:
+# 1. Search for Python files that use 'json.' or 'json.loads' or 'json.dumps' without importing json
+# 2. Common locations to check:
+#    - build scripts (build.py, setup.py, configure.py)
+#    - CI/CD scripts in .github/, .gitlab/, jenkins/
+#    - deployment scripts
+#    - Any Python file in the root directory
+#
+# The fix is to add at the top of the identified file(s):
+# import json
+#
+# This should be added after any __future__ imports but before other standard library imports.
+#
+# Example fix pattern:
+# #!/usr/bin/env python3
+# # existing comments
+# import json  # <-- ADD THIS LINE
+# import os
+# import sys
+# ... rest of the code
