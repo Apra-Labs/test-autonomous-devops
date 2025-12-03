@@ -67,3 +67,4 @@
 
 ### Test 2: Mock Mode Verification
 **Expected:** No real API calls in CI/CD (verify via logs)
+# Testing coordination workflow
