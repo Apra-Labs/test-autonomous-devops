@@ -658,6 +658,9 @@ class AutonomousAgent:
         if previous_attempts:
             why_previous_failed = f"\n\n**Why Previous Attempts Failed:**\n{llm_response.analysis.get('why_previous_failed', 'See previous commits')}"
 
+        # Get reasoning from either fix or analysis (different prompts use different structures)
+        reasoning = llm_response.fix.get('reasoning') or llm_response.analysis.get('reasoning', 'See root cause analysis above')
+
         message = f"""🤖 Autonomous Fix Attempt {attempt}: {llm_response.fix['description']}
 
 **Root Cause Analysis:**
@@ -668,9 +671,9 @@ class AutonomousAgent:
 {llm_response.fix['description']}
 
 **Reasoning:**
-{llm_response.fix['reasoning']}
+{reasoning}
 
-**Confidence:** {llm_response.analysis['confidence']:.2f}
+**Confidence:** {llm_response.analysis.get('confidence', 0.0):.2f}
 **Model Used:** {llm_response.model_used}
 
 ---
