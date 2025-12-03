@@ -24,16 +24,18 @@ class FlavorCoordinator:
     4. If fix works, skip LLM analysis (cost savings!)
     """
 
-    def __init__(self, github_client, repo: str, commit_sha: str):
+    def __init__(self, github_client, github_repo, repo: str, commit_sha: str):
         """
         Initialize coordinator
 
         Args:
-            github_client: GitHub API client (from git_operations)
+            github_client: Top-level GitHub API client (for search_issues)
+            github_repo: PyGithub Repository object (for create_issue)
             repo: Repository name (e.g., "Apra-Labs/ApraPipes")
             commit_sha: Current commit being built
         """
         self.github = github_client
+        self.github_repo = github_repo
         self.repo = repo
         self.commit_sha = commit_sha
         self.coordination_label = "autonomous-coordination"
@@ -160,8 +162,8 @@ class FlavorCoordinator:
 
         try:
             # Create real GitHub issue for coordination
-            if hasattr(self.github, 'create_issue'):
-                issue = self.github.create_issue(
+            if hasattr(self.github_repo, 'create_issue'):
+                issue = self.github_repo.create_issue(
                     title=title,
                     body=body,
                     labels=[self.coordination_label, f"commit-{self.commit_sha[:8]}"]

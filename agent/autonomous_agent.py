@@ -289,9 +289,10 @@ class AutonomousAgent:
             flavor = os.getenv('BUILD_FLAVOR', 'unknown')
             github_repo = os.getenv('GITHUB_REPOSITORY', '')
 
-            if flavor != 'unknown' and github_repo:
+            if flavor != 'unknown' and github_repo and self.git.github_repo:
                 coordinator = FlavorCoordinator(
-                    github_client=self.git,
+                    github_client=self.git.github,  # Top-level Github client for search
+                    github_repo=self.git.github_repo,  # Repository object for create_issue
                     repo=github_repo,
                     commit_sha=self.context_fetcher.commit_sha or 'unknown'
                 )

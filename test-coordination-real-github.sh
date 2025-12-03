@@ -11,10 +11,16 @@ echo "Mock LLM + Real GitHub API"
 echo "========================================="
 echo ""
 
+# Get token from gh CLI if not already set
 if [ -z "$GITHUB_TOKEN" ]; then
-  echo "❌ ERROR: GITHUB_TOKEN not set"
-  echo "   Export GITHUB_TOKEN before running this test"
-  exit 1
+  echo "Getting GitHub token from gh CLI..."
+  GITHUB_TOKEN=$(gh auth token 2>/dev/null)
+  if [ -z "$GITHUB_TOKEN" ]; then
+    echo "❌ ERROR: Could not get GitHub token from gh CLI"
+    echo "   Run: gh auth login"
+    exit 1
+  fi
+  export GITHUB_TOKEN
 fi
 
 export GITHUB_REPOSITORY="Apra-Labs/test-autonomous-devops"
@@ -106,7 +112,7 @@ echo ""
 # Check for coordination issues created
 echo "Checking GitHub for coordination lock issue..."
 cd /tmp/test-autonomous-devops
-lock_issues=$(gh issue list --label "coordination-lock" --json number,title,labels | python3 -c "import sys, json; print(len(json.load(sys.stdin)))")
+lock_issues=$(gh issue list --label "autonomous-coordination" --json number,title,labels | python3 -c "import sys, json; print(len(json.load(sys.stdin)))")
 echo "Coordination lock issues found: $lock_issues"
 echo ""
 
@@ -118,7 +124,7 @@ if [ $investigated -eq 1 ] && [ $skipped -eq 2 ]; then
   echo "   - Cost savings: 66% (would be 85% with 7 flavors)"
   echo ""
   echo "GitHub Issues created for coordination testing:"
-  gh issue list --label "coordination-lock" --json number,title --jq '.[] | "  #\(.number): \(.title)"'
+  gh issue list --label "autonomous-coordination" --json number,title --jq '.[] | "  #\(.number): \(.title)"'
   exit 0
 else
   echo "❌ COORDINATION NOT WORKING"
