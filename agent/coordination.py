@@ -117,13 +117,18 @@ class FlavorCoordinator:
             query = f"repo:{self.repo} is:issue is:open label:{self.coordination_label} {self.commit_sha[:8]} in:title"
 
             # Use GitHub API to search
-            # For now, return None (would need actual GitHub API integration)
-            # In real implementation:
-            # issues = self.github.search_issues(query)
-            # return issues[0] if issues else None
-
-            logger.info(f"Would search: {query}")
-            return None
+            # Search for existing coordination issue
+            if hasattr(self.github, 'search_issues'):
+                issues = self.github.search_issues(query, order='created', sort='desc')
+                if issues and len(issues) > 0:
+                    logger.info(f"Found existing coordination issue: #{issues[0].number}")
+                    return issues[0]
+                logger.info(f"No coordination issue found for commit {self.commit_sha[:8]}")
+                return None
+            else:
+                # Fallback for testing
+                logger.info(f"Would search: {query}")
+                return None
 
         except Exception as e:
             logger.error(f"Error finding coordination issue: {e}")
@@ -154,16 +159,19 @@ class FlavorCoordinator:
 """
 
         try:
-            # In real implementation:
-            # issue = self.github.create_issue(
-            #     title=title,
-            #     body=body,
-            #     labels=[self.coordination_label, f"commit-{self.commit_sha[:8]}"]
-            # )
-            # return issue
-
-            logger.info(f"Would create coordination issue: {title}")
-            return {'number': 12345, 'title': title}
+            # Create real GitHub issue for coordination
+            if hasattr(self.github, 'create_issue'):
+                issue = self.github.create_issue(
+                    title=title,
+                    body=body,
+                    labels=[self.coordination_label, f"commit-{self.commit_sha[:8]}"]
+                )
+                logger.info(f"Created coordination issue: #{issue.number}")
+                return {'number': issue.number, 'title': title, 'url': issue.html_url}
+            else:
+                # Fallback for testing
+                logger.info(f"Would create coordination issue: {title}")
+                return {'number': 12345, 'title': title}
 
         except Exception as e:
             logger.error(f"Error creating coordination issue: {e}")
