@@ -6,7 +6,7 @@
   "confidence": 0.9,
   "fix_description": "Add missing json import to fix the error",
   "pr_url": null,
-  "branch_name": "autonomous-fix-local-1764744546470",
+  "branch_name": "autonomous-fix-local-1764768728570",
   "skill_updated": false,
   "error_message": null
 }
