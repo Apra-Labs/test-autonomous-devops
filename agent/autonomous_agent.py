@@ -297,13 +297,8 @@ class AutonomousAgent:
                     commit_sha=self.context_fetcher.commit_sha or 'unknown'
                 )
 
-                # Generate error signature for deduplication
-                error_signature = coordinator.generate_error_signature(
-                    error_context.get('error_excerpt', '')
-                )
-
-                # Check if we should analyze
-                coordination = coordinator.should_analyze(flavor, error_signature)
+                # Check if another workflow is already fixing this commit
+                coordination = coordinator.should_analyze(flavor)
 
                 if not coordination['should_analyze']:
                     reason = coordination['reason']
