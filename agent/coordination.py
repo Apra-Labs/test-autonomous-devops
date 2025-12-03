@@ -121,10 +121,19 @@ class FlavorCoordinator:
             # Use GitHub API to search
             # Search for existing coordination issue
             if hasattr(self.github, 'search_issues'):
-                issues = self.github.search_issues(query, order='created', sort='desc')
-                if issues and len(issues) > 0:
-                    logger.info(f"Found existing coordination issue: #{issues[0].number}")
-                    return issues[0]
+                issues = self.github.search_issues(query)
+                if issues and issues.totalCount > 0:
+                    # Get first result
+                    first_issue = next(iter(issues), None)
+                    if first_issue:
+                        logger.info(f"Found existing coordination issue: #{first_issue.number}")
+                        # Convert to dict for easier handling
+                        return {
+                            'number': first_issue.number,
+                            'title': first_issue.title,
+                            'body': first_issue.body,
+                            'url': first_issue.html_url
+                        }
                 logger.info(f"No coordination issue found for commit {self.commit_sha[:8]}")
                 return None
             else:
