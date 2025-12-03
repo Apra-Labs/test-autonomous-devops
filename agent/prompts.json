@@ -12,7 +12,7 @@
 
     "user_template": "## Original Build Error\n\n```\n{original_error}\n```\n\n## Final Code Changes\n\n```diff\n{final_diff}\n```\n\n## Context\n\n- This fix was developed over {attempt_count} attempt(s)\n- The final changeset above represents the complete solution\n- Platform: {platform}\n\n## Task\n\nWrite a clear, concise PR description that explains:\n1. What was the problem?\n2. How does the final changeset solve it?\n3. Why will this work?\n\nDo NOT describe the intermediate attempts or trial-and-error process. Focus on the final solution.\n\nProvide your response as JSON:\n\n```json\n{{\n  \"title\": \"Concise title (max 80 chars)\",\n  \"body\": \"Markdown-formatted PR body with sections for Problem, Solution, and Why It Works\"\n}}\n```",
 
-    "response_format\": \"json"
+    "response_format": "json"
   },
 
   "escalation_summary": {
