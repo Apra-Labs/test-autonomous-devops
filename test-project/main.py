@@ -1,25 +1,35 @@
-"""
-Test Scenario 3: Simple 2-bug scenario for CASE 2 testing
+"""Main module with utility functions."""
 
-BUG 1: Missing json import (will fail first)
-BUG 2: Undefined variable (will fail after BUG 1 is fixed)
-"""
 from datetime import datetime
 
-def format_user_data(name, birth_year):
-    """Format user data as JSON"""
-    current_year = datetime.now().year
-    age = current_year - birth_year
 
-    # BUG 1: Missing import for json module
-    data = json.dumps({
-        "name": name,
-        "age": age,
-        "timestamp": datetime.now().isoformat(),
-        "status": user_status  # BUG 2: Undefined variable
-    })
-    return data
+def calculate_age(birth_year: int) -> int:
+    """Calculate age based on birth year.
+    
+    Args:
+        birth_year: The year of birth
+        
+    Returns:
+        The calculated age in years
+    """
+    current_year = datetime.now().year
+    return current_year - birth_year
+
+
+def format_greeting(name: str) -> str:
+    """Format a greeting message.
+    
+    Args:
+        name: The name to greet
+        
+    Returns:
+        A formatted greeting string
+    """
+    return f"Hello, {name}!"
+
 
 if __name__ == "__main__":
-    result = format_user_data("Test User", 1990)
-    print(result)
+    # Example usage
+    age = calculate_age(1990)
+    print(f"Age: {age}")
+    print(format_greeting("World"))
