@@ -562,7 +562,7 @@ class AutonomousAgent:
 {llm_response.fix['description']}
 
 **Reasoning:**
-{llm_response.analysis['reasoning']}
+{llm_response.fix['reasoning']}
 
 **Confidence:** {llm_response.analysis['confidence']:.2f}
 **Model Used:** {llm_response.model_used}
