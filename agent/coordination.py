@@ -115,30 +115,33 @@ class FlavorCoordinator:
     def _find_coordination_issue(self) -> Optional[Dict]:
         """Find existing coordination issue for this commit"""
         try:
+            # Use Repository.get_issues() instead of search API to avoid indexing delays
             # Search for open issues with coordination label and commit SHA in title
-            query = f"repo:{self.repo} is:issue is:open label:{self.coordination_label} {self.commit_sha[:8]} in:title"
+            if hasattr(self.github_repo, 'get_issues'):
+                # Get open issues with coordination label
+                issues = self.github_repo.get_issues(
+                    state='open',
+                    labels=[self.coordination_label]
+                )
 
-            # Use GitHub API to search
-            # Search for existing coordination issue
-            if hasattr(self.github, 'search_issues'):
-                issues = self.github.search_issues(query)
-                if issues and issues.totalCount > 0:
-                    # Get first result
-                    first_issue = next(iter(issues), None)
-                    if first_issue:
-                        logger.info(f"Found existing coordination issue: #{first_issue.number}")
+                # Filter for our commit SHA in title
+                commit_prefix = self.commit_sha[:8]
+                for issue in issues:
+                    if commit_prefix in issue.title:
+                        logger.info(f"Found existing coordination issue: #{issue.number}")
                         # Convert to dict for easier handling
                         return {
-                            'number': first_issue.number,
-                            'title': first_issue.title,
-                            'body': first_issue.body,
-                            'url': first_issue.html_url
+                            'number': issue.number,
+                            'title': issue.title,
+                            'body': issue.body,
+                            'url': issue.html_url
                         }
+
                 logger.info(f"No coordination issue found for commit {self.commit_sha[:8]}")
                 return None
             else:
                 # Fallback for testing
-                logger.info(f"Would search: {query}")
+                logger.info(f"Would list issues with label {self.coordination_label}")
                 return None
 
         except Exception as e:
