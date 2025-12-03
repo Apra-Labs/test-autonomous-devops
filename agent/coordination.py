@@ -245,11 +245,5 @@ Other flavors can now:
 class CoordinationConfig:
     """Configuration for flavor coordination"""
 
-    # Wait time before giving up on first flavor (minutes)
-    MAX_WAIT_TIME = 15
-
-    # Maximum flavors to wait for before force-analyzing
-    MAX_WAITING_FLAVORS = 3
-
     # Whether to enable coordination (can disable for testing)
     ENABLED = True
