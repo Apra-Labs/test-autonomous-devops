@@ -595,7 +595,8 @@ Applied fix after {attempt_count} attempt(s). The final changeset resolves the i
                 turn=turn,
                 github_repo=github_repo,
                 branch=branch,
-                commit_sha=commit_sha
+                commit_sha=commit_sha,
+                context_fetcher=context_fetcher
             )
 
             # Call LLM
@@ -680,7 +681,8 @@ Applied fix after {attempt_count} attempt(s). The final changeset resolves the i
 
     def _build_investigation_prompt(self, error_context: Dict, previous_attempts: List[Dict],
                                    conversation_history: List[Dict], turn: int,
-                                   github_repo: str = '', branch: str = '', commit_sha: str = '') -> str:
+                                   github_repo: str = '', branch: str = '', commit_sha: str = '',
+                                   context_fetcher=None) -> str:
         """Build prompt for investigation turn"""
         template = self.prompts['investigate_failure']
 
@@ -712,6 +714,24 @@ Applied fix after {attempt_count} attempt(s). The final changeset resolves the i
                 for i, att in enumerate(previous_attempts)
             ])
 
+        # Get git history and regression analysis (only on first turn)
+        if turn == 1 and context_fetcher:
+            git_history = context_fetcher.get_recent_commits_with_context(branch, limit=5)
+            regression = context_fetcher.analyze_regression(branch, commit_sha)
+
+            # Format regression analysis
+            if regression.get('is_regression') == 'likely':
+                regression_text = f"""**Status:** Likely regression (recent commits may have broken previously working code)
+**Recent commits:** {regression.get('recent_commits_count', 0)}
+**Suggestion:** {regression.get('suggestion', 'Review recent changes')}"""
+            elif regression.get('is_regression') == 'unlikely':
+                regression_text = f"**Status:** Unlikely regression\n**Reason:** {regression.get('reason', 'Unknown')}"
+            else:
+                regression_text = "**Status:** Unknown (could not determine)"
+        else:
+            git_history = "*(Git history shown on first turn)*"
+            regression_text = "*(Regression analysis shown on first turn)*"
+
         # Build prompt
         metadata_dict = error_context.get('metadata_dict', {})
         prompt = template['user_template'].format(
@@ -723,6 +743,8 @@ Applied fix after {attempt_count} attempt(s). The final changeset resolves the i
             error_type=error_context.get('error_type', 'unknown'),
             metadata=error_context.get('metadata', ''),
             error_excerpt=error_context.get('error_excerpt', ''),
+            git_history=git_history,
+            regression_analysis=regression_text,
             conversation_history=history_text,
             previous_attempts=attempts_text
         )

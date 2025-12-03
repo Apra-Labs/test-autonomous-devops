@@ -238,22 +238,25 @@ class ContextFetcher:
 
     def _fetch_git_log(self, target: str, reason: str) -> Dict:
         """
-        Fetch git commit history
+        Fetch git commit history with diffs
 
         Args:
-            target: 'all' or specific file path
+            target: 'all' or specific file path or 'recent_with_diffs'
             reason: Why LLM needs this history
 
         Returns:
             Dict with git log or error
         """
         try:
-            if target == 'all':
-                # Get last 10 commits
+            if target == 'recent_with_diffs':
+                # Get last 5 commits with diffs (most useful for debugging)
+                cmd = ['git', 'log', '-5', '--pretty=format:%h|%an|%ar|%s', '--stat']
+            elif target == 'all':
+                # Get last 10 commits (summary only)
                 cmd = ['git', 'log', '--oneline', '-10']
             else:
-                # Get last 5 commits for specific file
-                cmd = ['git', 'log', '--oneline', '-5', '--', target]
+                # Get last 5 commits for specific file with diffs
+                cmd = ['git', 'log', '-5', '--pretty=format:%h|%an|%ar|%s', '--stat', '--', target]
 
             result = subprocess.run(
                 cmd,
@@ -269,7 +272,10 @@ class ContextFetcher:
                     'target': target,
                     'reason': reason,
                     'status': 'success',
-                    'content': result.stdout
+                    'content': result.stdout,
+                    'metadata': {
+                        'commits_shown': min(5 if 'recent' in target else 10, result.stdout.count('\n'))
+                    }
                 }
             else:
                 return {
@@ -288,6 +294,96 @@ class ContextFetcher:
                 'status': 'error',
                 'content': f"Error fetching git log: {e}"
             }
+
+    def get_recent_commits_with_context(self, branch: str, limit: int = 5) -> str:
+        """
+        Get recent commits on branch with full context
+
+        Args:
+            branch: Branch name
+            limit: Number of commits to fetch
+
+        Returns:
+            Formatted commit history with diffs
+        """
+        try:
+            # Get commits with full details
+            cmd = [
+                'git', 'log', f'-{limit}',
+                '--pretty=format:---COMMIT---%n%H%n%an <%ae>%n%ar%n%s%n%b',
+                '--stat',
+                branch
+            ]
+
+            result = subprocess.run(
+                cmd,
+                cwd=self.repo_root,
+                capture_output=True,
+                text=True,
+                timeout=15
+            )
+
+            if result.returncode == 0:
+                return result.stdout
+            else:
+                return f"Error fetching commits: {result.stderr}"
+
+        except Exception as e:
+            return f"Error: {e}"
+
+    def analyze_regression(self, branch: str, current_commit: str) -> Dict:
+        """
+        Analyze if this is a regression (was working, now broken)
+
+        Args:
+            branch: Branch name
+            current_commit: Current failing commit SHA
+
+        Returns:
+            Dict with regression analysis
+        """
+        try:
+            # Check if there are any successful builds in recent history
+            # This would require integration with CI/GitHub Actions API
+            # For now, analyze recent commits
+
+            cmd = [
+                'git', 'log', '-10', '--oneline',
+                '--pretty=format:%h|%s',
+                branch
+            ]
+
+            result = subprocess.run(
+                cmd,
+                cwd=self.repo_root,
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+
+            if result.returncode != 0:
+                return {'is_regression': 'unknown', 'reason': 'Could not fetch git history'}
+
+            commits = result.stdout.strip().split('\n')
+
+            # Simple heuristic: if we have recent commits, this might be a regression
+            if len(commits) > 1:
+                recent_commits = commits[:5]  # Last 5 commits
+
+                return {
+                    'is_regression': 'likely' if len(recent_commits) > 1 else 'unknown',
+                    'recent_commits_count': len(recent_commits),
+                    'commits': [c.split('|') for c in recent_commits],
+                    'suggestion': 'Consider reverting recent commits one by one to identify breaking change'
+                }
+            else:
+                return {
+                    'is_regression': 'unlikely',
+                    'reason': 'No recent commits to cause regression'
+                }
+
+        except Exception as e:
+            return {'is_regression': 'unknown', 'error': str(e)}
 
     def format_fulfilled_requests(self, fulfilled_requests: List[Dict]) -> str:
         """
