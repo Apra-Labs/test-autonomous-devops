@@ -254,10 +254,24 @@ class GitHubContextFetcher:
 
             logs = log_result.stdout
 
-            # Extract error annotations from logs (lines with ##[error])
+            # Extract error annotations from logs with step names
+            # Track current step using ##[debug]Starting: step-name markers
             error_lines = []
+            current_step = "UNKNOWN STEP"
+
             for line in logs.split('\n'):
+                # Track step transitions
+                if '##[debug]Starting:' in line:
+                    # Extract step name from "##[debug]Starting: Step Name"
+                    parts = line.split('##[debug]Starting:', 1)
+                    if len(parts) == 2:
+                        current_step = parts[1].strip()
+
+                # Capture errors/warnings with current step name
                 if '##[error]' in line or '##[warning]' in line:
+                    # Replace "UNKNOWN STEP" in the line with actual step name
+                    if '\tUNKNOWN STEP\t' in line and current_step != "UNKNOWN STEP":
+                        line = line.replace('\tUNKNOWN STEP\t', f'\t{current_step}\t', 1)
                     error_lines.append(line.strip())
 
             return {
