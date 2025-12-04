@@ -40,13 +40,15 @@ class SmartLogExtractor:
         """
         self.max_excerpt_lines = max_excerpt_lines
 
-    def extract_relevant_error(self, log_path: str, platform: str = "unknown") -> Dict:
+    def extract_relevant_error(self, log_path: str, platform: str = "unknown",
+                              github_annotations: Dict = None) -> Dict:
         """
         Extract the most relevant error context from huge logs
 
         Args:
             log_path: Path to build log file
             platform: Platform identifier
+            github_annotations: Optional GitHub annotations data to help classify error
 
         Returns:
             Dict with error excerpt and metadata
@@ -87,7 +89,7 @@ class SmartLogExtractor:
 
         # Classify error type
         excerpt_text = "".join(excerpt_lines)
-        error_type = self._classify_error(excerpt_text)
+        error_type = self._classify_error(excerpt_text, github_annotations)
 
         logger.info(f"Extracted {len(excerpt_lines)} lines, error type: {error_type}")
 
@@ -119,22 +121,44 @@ class SmartLogExtractor:
                 return i
         return None
 
-    def _classify_error(self, excerpt: str) -> str:
+    def _classify_error(self, excerpt: str, github_annotations: Dict = None) -> str:
         """
         Classify error type to help LLM understand context
 
         Args:
             excerpt: Error excerpt text
+            github_annotations: Optional GitHub annotations to help classify
 
         Returns:
             Error classification string
         """
         text_lower = excerpt.lower()
 
+        # First, check GitHub annotations if available (most reliable)
+        if github_annotations and github_annotations.get('status') == 'success':
+            job_name = github_annotations.get('job_name', '').lower()
+            error_lines = github_annotations.get('error_annotations', [])
+
+            # Check if it's a prep/check step failure
+            if 'prep' in job_name or 'check' in job_name:
+                # Look for exit code errors in prep phase
+                if any('exit code' in line.lower() for line in error_lines):
+                    return "prep_command_failure"
+
+            # Check for specific error types in annotations
+            annotation_text = ' '.join(error_lines).lower()
+            if 'vcpkg' in annotation_text:
+                return "vcpkg_dependency"
+            elif 'cmake error' in annotation_text:
+                return "cmake_configuration"
+            elif 'undefined reference' in annotation_text or 'unresolved external' in annotation_text:
+                return "linker_error"
+
+        # Fall back to excerpt analysis
         # Order matters - check most specific first
         if "vcpkg" in text_lower or "triplet" in text_lower:
             return "vcpkg_dependency"
-        elif "cmake error" in text_lower or "cmake" in text_lower:
+        elif "cmake error" in text_lower:  # More specific - require "cmake error" not just "cmake"
             return "cmake_configuration"
         elif "undefined reference" in text_lower or "unresolved external" in text_lower:
             return "linker_error"

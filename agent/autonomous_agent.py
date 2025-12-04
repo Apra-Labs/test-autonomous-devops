@@ -292,12 +292,8 @@ class AutonomousAgent:
         # Generate fix ID (use timestamp or workflow run ID)
         fix_id = os.getenv('GITHUB_RUN_ID', f"local-{int(os.times().elapsed * 1000)}")
 
-        # Extract error context from log using smart extractor
-        error_context = self.log_extractor.extract_relevant_error(failure_log, platform=self.build_flavor)
-
-        logger.info(f"Extracted {error_context['excerpt_lines']} lines, type: {error_context['error_type']}")
-
-        # Fetch GitHub context (annotations, workflow files, job logs)
+        # Fetch GitHub context FIRST (annotations, workflow files, job logs)
+        # This allows proper error classification based on GitHub's own error markers
         github_annotations = {}
         github_workflow_files = {}
         github_job_logs = {}
@@ -313,6 +309,16 @@ class AutonomousAgent:
             if self.workflow_name:
                 github_workflow_files = self.github_context.fetch_workflow_files(workflow_name=self.workflow_name)
                 logger.info(f"Workflow files status: {github_workflow_files['status']}, count: {github_workflow_files.get('file_count', 0)}")
+
+        # Extract error context from log using smart extractor
+        # Pass GitHub annotations to allow proper error classification based on actual GitHub error markers
+        error_context = self.log_extractor.extract_relevant_error(
+            failure_log,
+            platform=self.build_flavor,
+            github_annotations=github_job_logs
+        )
+
+        logger.info(f"Extracted {error_context['excerpt_lines']} lines, type: {error_context['error_type']}")
 
         # Add GitHub context to error_context for LLM
         error_context['github_annotations'] = github_job_logs
@@ -448,8 +454,21 @@ class AutonomousAgent:
         # Load previous attempts
         previous_attempts = self._load_previous_attempts(fix_id)
 
+        # Fetch GitHub context FIRST (annotations, workflow files, job logs)
+        # This allows proper error classification based on GitHub's own error markers
+        github_job_logs = {}
+        if self.run_id and not self.mock_git:
+            logger.info("Fetching GitHub context (annotations, logs)...")
+            github_job_logs = self.github_context.fetch_job_logs(build_flavor=self.build_flavor)
+            logger.info(f"Job logs status: {github_job_logs['status']}, errors: {github_job_logs.get('error_count', 0)}")
+
         # Extract error context from log using smart extractor
-        error_context = self.log_extractor.extract_relevant_error(failure_log, platform=self.build_flavor)
+        # Pass GitHub annotations to allow proper error classification based on actual GitHub error markers
+        error_context = self.log_extractor.extract_relevant_error(
+            failure_log,
+            platform=self.build_flavor,
+            github_annotations=github_job_logs
+        )
 
         logger.info(f"Extracted {error_context['excerpt_lines']} lines, type: {error_context['error_type']}")
 
