@@ -602,6 +602,9 @@ Applied fix after {attempt_count} attempt(s). The final changeset resolves the i
                 context_fetcher=context_fetcher
             )
 
+            # Log prompt for review (in both mock and real modes)
+            logger.info(f"\n{'='*80}\n📤 PROMPT TO LLM (Turn {turn}):\n{'='*80}\n{prompt}\n{'='*80}")
+
             # Call LLM
             if self.mock_mode:
                 logger.info("🔸 MOCK MODE: Using simulated LLM response (NO API CALL)")
@@ -610,7 +613,6 @@ Applied fix after {attempt_count} attempt(s). The final changeset resolves the i
                 response_text = str(response_json)
             else:
                 logger.warning(f"💰 REAL API CALL: Calling Anthropic API with model {model} - THIS COSTS MONEY!")
-                logger.info(f"\n{'='*80}\n📤 PROMPT TO LLM (Turn {turn}):\n{'='*80}\n{prompt}\n{'='*80}")
 
                 template = self.prompts['investigate_failure']
                 response = self.client.messages.create(
