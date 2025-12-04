@@ -771,6 +771,26 @@ Applied fix after {attempt_count} attempt(s). The final changeset resolves the i
             git_history = "*(Git history shown on first turn)*"
             regression_text = "*(Regression analysis shown on first turn)*"
 
+        # Format GitHub annotations (only on first turn)
+        if turn == 1:
+            github_annotations_data = error_context.get('github_annotations', {})
+            github_workflow_files_data = error_context.get('github_workflow_files', {})
+
+            # Import github_context module for formatting
+            try:
+                from github_context import GitHubContextFetcher
+                gh_fetcher = GitHubContextFetcher(github_token='', github_repo='')  # Just for formatting methods
+
+                github_annotations_text = gh_fetcher.format_error_lines_for_prompt(github_annotations_data)
+                github_workflow_files_text = gh_fetcher.format_workflow_files_for_prompt(github_workflow_files_data)
+            except Exception as e:
+                logger.warning(f"Could not format GitHub context: {e}")
+                github_annotations_text = "*GitHub annotations unavailable*"
+                github_workflow_files_text = "*Workflow files unavailable*"
+        else:
+            github_annotations_text = "*(GitHub annotations shown on first turn)*"
+            github_workflow_files_text = "*(Workflow files shown on first turn)*"
+
         # Build prompt
         metadata_dict = error_context.get('metadata_dict', {})
         prompt = template['user_template'].format(
@@ -778,6 +798,8 @@ Applied fix after {attempt_count} attempt(s). The final changeset resolves the i
             branch=branch or 'unknown',
             commit_sha=commit_sha or 'unknown',
             platform=metadata_dict.get('platform', 'unknown'),
+            github_annotations=github_annotations_text,
+            workflow_files=github_workflow_files_text,
             context_type=error_context.get('context_type', 'unknown'),
             error_type=error_context.get('error_type', 'unknown'),
             metadata=error_context.get('metadata', ''),

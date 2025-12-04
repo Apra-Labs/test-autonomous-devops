@@ -26,6 +26,7 @@ try:
     from .log_extractor import SmartLogExtractor
     from .context_fetcher import ContextFetcher
     from .coordination import FlavorCoordinator, CoordinationConfig
+    from .github_context import GitHubContextFetcher
 except ImportError:
     from config import AgentConfig, DEFAULT_CONFIG
     from llm_client import LLMClient
@@ -33,6 +34,7 @@ except ImportError:
     from log_extractor import SmartLogExtractor
     from context_fetcher import ContextFetcher
     from coordination import FlavorCoordinator, CoordinationConfig
+    from github_context import GitHubContextFetcher
 
 # Configure logging
 logging.basicConfig(
@@ -81,7 +83,8 @@ class AutonomousAgent:
     """
 
     def __init__(self, config: Optional[AgentConfig] = None, mock_mode: bool = False,
-                 mock_llm: bool = None, mock_git: bool = None):
+                 mock_llm: bool = None, mock_git: bool = None, build_flavor: str = 'unknown',
+                 run_id: str = None, workflow_name: str = None):
         """
         Initialize agent
 
@@ -90,9 +93,15 @@ class AutonomousAgent:
             mock_mode: If True, use mock clients (no real API/Git calls) - DEPRECATED, use mock_llm and mock_git
             mock_llm: If True, mock LLM API calls (overrides mock_mode for LLM)
             mock_git: If True, mock Git operations (overrides mock_mode for Git)
+            build_flavor: Build flavor (e.g., Win-nocuda, Linux)
+            run_id: GitHub workflow run ID
+            workflow_name: GitHub workflow name
         """
         self.config = config or DEFAULT_CONFIG
         self.mock_mode = mock_mode  # Keep for backward compatibility
+        self.build_flavor = build_flavor
+        self.run_id = run_id
+        self.workflow_name = workflow_name
 
         # Allow separate control of LLM vs Git mocking
         self.mock_llm = mock_llm if mock_llm is not None else mock_mode
@@ -138,6 +147,12 @@ class AutonomousAgent:
             max_file_size=self.config.model.MAX_FILE_SIZE_BYTES,
             github_repo=github_repo,
             commit_sha=commit_sha
+        )
+
+        self.github_context = GitHubContextFetcher(
+            github_token=github_token,
+            github_repo=github_repo,
+            run_id=self.run_id
         )
 
     def run(self, branch: str, build_status: str, failure_log: Optional[str] = None) -> AgentResult:
@@ -278,9 +293,30 @@ class AutonomousAgent:
         fix_id = os.getenv('GITHUB_RUN_ID', f"local-{int(os.times().elapsed * 1000)}")
 
         # Extract error context from log using smart extractor
-        error_context = self.log_extractor.extract_relevant_error(failure_log, platform="unknown")
+        error_context = self.log_extractor.extract_relevant_error(failure_log, platform=self.build_flavor)
 
         logger.info(f"Extracted {error_context['excerpt_lines']} lines, type: {error_context['error_type']}")
+
+        # Fetch GitHub context (annotations, workflow files, job logs)
+        github_annotations = {}
+        github_workflow_files = {}
+        github_job_logs = {}
+
+        if self.run_id and not self.mock_git:
+            logger.info("Fetching GitHub context (annotations, logs, workflow files)...")
+
+            # Fetch job logs (which includes GitHub error annotations like ##[error])
+            github_job_logs = self.github_context.fetch_job_logs(build_flavor=self.build_flavor)
+            logger.info(f"Job logs status: {github_job_logs['status']}, errors: {github_job_logs.get('error_count', 0)}")
+
+            # Fetch workflow files
+            if self.workflow_name:
+                github_workflow_files = self.github_context.fetch_workflow_files(workflow_name=self.workflow_name)
+                logger.info(f"Workflow files status: {github_workflow_files['status']}, count: {github_workflow_files.get('file_count', 0)}")
+
+        # Add GitHub context to error_context for LLM
+        error_context['github_annotations'] = github_job_logs
+        error_context['github_workflow_files'] = github_workflow_files
 
         # COORDINATION CHECK: Avoid duplicate LLM analysis across flavors
         # Note: Coordination uses GitHub API, so we only skip it if git_operations is in mock mode
@@ -360,7 +396,17 @@ class AutonomousAgent:
         )
 
         # Push
-        self.git.push_branch(branch_name)
+        push_success = self.git.push_branch(branch_name)
+
+        if not push_success:
+            logger.error(f"❌ Failed to push {branch_name}")
+            return AgentResult(
+                success=False,
+                action_taken='error',
+                attempt=1,
+                model_used=llm_response.model_used,
+                error_message=f"Failed to push branch {branch_name} to remote"
+            )
 
         logger.info(f"✅ CASE 1 complete: Created {branch_name}, pushed commit {commit_sha[:8]}")
 
@@ -369,7 +415,7 @@ class AutonomousAgent:
             action_taken='first_failure',
             attempt=1,
             model_used=llm_response.model_used,
-            confidence=llm_response.analysis['confidence'],
+            confidence=llm_response.analysis.get('confidence', 0.0),
             fix_description=llm_response.fix['description'],
             branch_name=branch_name
         )
@@ -403,7 +449,7 @@ class AutonomousAgent:
         previous_attempts = self._load_previous_attempts(fix_id)
 
         # Extract error context from log using smart extractor
-        error_context = self.log_extractor.extract_relevant_error(failure_log, platform="unknown")
+        error_context = self.log_extractor.extract_relevant_error(failure_log, platform=self.build_flavor)
 
         logger.info(f"Extracted {error_context['excerpt_lines']} lines, type: {error_context['error_type']}")
 
@@ -451,7 +497,17 @@ class AutonomousAgent:
 
         # Push to same branch
         branch_name = self.config.git.format_branch_name(fix_id)
-        self.git.push_branch(branch_name, force=True)
+        push_success = self.git.push_branch(branch_name, force=True)
+
+        if not push_success:
+            logger.error(f"❌ Failed to push {branch_name}")
+            return AgentResult(
+                success=False,
+                action_taken='error',
+                attempt=next_attempt,
+                model_used=llm_response.model_used,
+                error_message=f"Failed to push branch {branch_name} to remote"
+            )
 
         logger.info(f"✅ CASE 2 complete: Pushed attempt {next_attempt} to {branch_name}")
 
@@ -460,7 +516,7 @@ class AutonomousAgent:
             action_taken='retry',
             attempt=next_attempt,
             model_used=llm_response.model_used,
-            confidence=llm_response.analysis['confidence'],
+            confidence=llm_response.analysis.get('confidence', 0.0),
             fix_description=llm_response.fix['description'],
             branch_name=branch_name
         )
@@ -488,7 +544,7 @@ class AutonomousAgent:
             original_error=original_error,
             final_diff=final_diff,
             attempt_count=attempt_count,
-            platform="unknown"
+            platform=self.build_flavor
         )
 
         # Update skill
@@ -764,6 +820,21 @@ def main():
     )
 
     parser.add_argument(
+        '--build-flavor',
+        help='Build flavor (e.g., Win-nocuda, Linux)'
+    )
+
+    parser.add_argument(
+        '--run-id',
+        help='GitHub workflow run ID'
+    )
+
+    parser.add_argument(
+        '--workflow-name',
+        help='GitHub workflow name'
+    )
+
+    parser.add_argument(
         '--output',
         default='agent-result.json',
         help='Output file for agent result'
@@ -797,7 +868,10 @@ def main():
     agent = AutonomousAgent(
         mock_mode=args.mock_mode,
         mock_llm=mock_llm,
-        mock_git=mock_git
+        mock_git=mock_git,
+        build_flavor=args.build_flavor or 'unknown',
+        run_id=args.run_id,
+        workflow_name=args.workflow_name
     )
 
     # Run agent
