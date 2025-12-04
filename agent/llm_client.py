@@ -757,7 +757,7 @@ Applied fix after {attempt_count} attempt(s). The final changeset resolves the i
 
         # Get git history and regression analysis (only on first turn)
         if turn == 1 and context_fetcher:
-            git_history = context_fetcher.get_recent_commits_with_context(branch, limit=5)
+            git_history = context_fetcher.get_recent_commits_with_context(branch, limit=2)
             regression = context_fetcher.analyze_regression(branch, commit_sha)
 
             # Format regression analysis
