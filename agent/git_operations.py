@@ -179,17 +179,26 @@ class GitOperations:
 
                 if action == 'patch':
                     # Apply git-style diff
-                    diff_content = change.get('diff', '')
-                    if not diff_content:
-                        raise ValueError("Patch action requires 'diff' field")
+                    # Support both base64 (preferred) and plain text (legacy)
+                    diff_base64 = change.get('diff_base64')
+                    diff_text = change.get('diff')
 
-                    # Write diff to temp file
-                    # CRITICAL: Git patches MUST end with a newline
+                    if diff_base64:
+                        # Base64 approach - pristine patch, no special handling needed
+                        import base64
+                        diff_bytes = base64.b64decode(diff_base64)
+                    elif diff_text:
+                        # Legacy approach - plain text with newline fix for backward compatibility
+                        diff_bytes = diff_text.encode('utf-8')
+                        if not diff_text.endswith('\n'):
+                            diff_bytes += b'\n'
+                    else:
+                        raise ValueError("Patch action requires 'diff_base64' or 'diff' field")
+
+                    # Write patch to temp file (binary mode for pristine preservation)
                     import tempfile
-                    with tempfile.NamedTemporaryFile(mode='w', suffix='.patch', delete=False) as f:
-                        f.write(diff_content)
-                        if not diff_content.endswith('\n'):
-                            f.write('\n')
+                    with tempfile.NamedTemporaryFile(mode='wb', suffix='.patch', delete=False) as f:
+                        f.write(diff_bytes)
                         patch_file = f.name
 
                     try:

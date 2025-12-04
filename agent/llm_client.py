@@ -828,7 +828,24 @@ Applied fix after {attempt_count} attempt(s). The final changeset resolves the i
                 'reasoning': 'Error traceback shows issue in main.py, need to see the code'
             }
         else:
-            # Second turn - propose fix with git-style diff
+            # Second turn - propose fix with base64-encoded git-style diff
+            import base64
+
+            patch = '''--- a/test-project/main.py
++++ b/test-project/main.py
+@@ -1,6 +1,7 @@
+ """
+ Simple test module for autonomous agent testing
+ """
+ from datetime import datetime
++import json
+
+ def calculate_age(birth_year):
+'''
+
+            # Base64 encode the patch
+            diff_base64 = base64.b64encode(patch.encode('utf-8')).decode('ascii')
+
             return {
                 'action': 'propose_fix',
                 'confidence': 0.90,  # Used by investigate_failure_iteratively
@@ -843,17 +860,7 @@ Applied fix after {attempt_count} attempt(s). The final changeset resolves the i
                     'files_to_change': [{
                         'path': 'test-project/main.py',
                         'action': 'patch',
-                        'diff': '''--- a/test-project/main.py
-+++ b/test-project/main.py
-@@ -1,6 +1,7 @@
- """
- Simple test module for autonomous agent testing
- """
- from datetime import datetime
-+import json
-
- def calculate_age(birth_year):
-'''
+                        'diff_base64': diff_base64
                     }]
                 }
             }
