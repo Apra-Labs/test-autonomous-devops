@@ -149,7 +149,10 @@ class GitOperations:
         Apply file changes from fix
 
         Args:
-            file_changes: List of file changes (path, action, content)
+            file_changes: List of file changes with one of:
+                - action='patch', diff='...' (git-style diff)
+                - action='replace', new_content='...' (complete file content)
+                - action='delete' (remove file)
 
         Returns:
             List of results for each file change
@@ -159,11 +162,6 @@ class GitOperations:
         for change in file_changes:
             path = change['path']
             action = change['action']
-
-            # Support both old and new formats
-            # Old: action='edit', content='...'
-            # New: action='replace', new_content='...'
-            content = change.get('new_content') or change.get('content', '')
 
             logger.info(f"Applying {action} to {path}")
 
@@ -179,7 +177,41 @@ class GitOperations:
             try:
                 file_path = self.repo_path / path
 
-                if action in ['create', 'edit', 'replace']:
+                if action == 'patch':
+                    # Apply git-style diff
+                    diff_content = change.get('diff', '')
+                    if not diff_content:
+                        raise ValueError("Patch action requires 'diff' field")
+
+                    # Write diff to temp file
+                    import tempfile
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.patch', delete=False) as f:
+                        f.write(diff_content)
+                        patch_file = f.name
+
+                    try:
+                        # Try git apply first (check only)
+                        result = self.git_repo.git.apply('--check', patch_file)
+
+                        # If check passes, actually apply
+                        self.git_repo.git.apply(patch_file)
+                        self.git_repo.git.add(path)
+
+                        logger.info(f"Applied patch to {path} successfully")
+
+                    except Exception as e:
+                        logger.error(f"Git apply failed for {path}: {e}")
+                        raise
+                    finally:
+                        import os
+                        os.unlink(patch_file)
+
+                elif action in ['create', 'edit', 'replace']:
+                    # Support legacy format: complete file content
+                    # Old: action='edit', content='...'
+                    # New: action='replace', new_content='...'
+                    content = change.get('new_content') or change.get('content', '')
+
                     # Create parent directories if needed
                     file_path.parent.mkdir(parents=True, exist_ok=True)
 

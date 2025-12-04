@@ -828,7 +828,7 @@ Applied fix after {attempt_count} attempt(s). The final changeset resolves the i
                 'reasoning': 'Error traceback shows issue in main.py, need to see the code'
             }
         else:
-            # Second turn - propose fix with COMPLETE file content
+            # Second turn - propose fix with git-style diff
             return {
                 'action': 'propose_fix',
                 'confidence': 0.90,  # Used by investigate_failure_iteratively
@@ -842,36 +842,17 @@ Applied fix after {attempt_count} attempt(s). The final changeset resolves the i
                     'reasoning': 'Error shows json module not imported but is used in the code',
                     'files_to_change': [{
                         'path': 'test-project/main.py',
-                        'action': 'replace',
-                        'new_content': '''"""
-Simple test module for autonomous agent testing
+                        'action': 'patch',
+                        'diff': '''--- a/test-project/main.py
++++ b/test-project/main.py
+@@ -1,6 +1,7 @@
+ """
+ Simple test module for autonomous agent testing
+ """
+ from datetime import datetime
++import json
 
-FIXED: Added json import
-"""
-from datetime import datetime
-import json
-
-def calculate_age(birth_year):
-    """Calculate age from birth year"""
-    current_year = datetime.now().year
-    age = current_year - birth_year
-    return age
-
-def format_greeting(name, birth_year):
-    """Format a greeting with age"""
-    age = calculate_age(birth_year)
-
-    # Fixed: json module now imported
-    data = json.dumps({
-        "greeting": f"Hello {name}!",
-        "age": age,
-        "message": f"You are {age} years old"
-    })
-    return data
-
-if __name__ == "__main__":
-    result = format_greeting("Test User", 1990)
-    print(result)
+ def calculate_age(birth_year):
 '''
                     }]
                 }
