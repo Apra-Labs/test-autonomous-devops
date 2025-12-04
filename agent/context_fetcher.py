@@ -307,6 +307,19 @@ class ContextFetcher:
             Formatted commit history with diffs
         """
         try:
+            # Deepen shallow clone to get proper history
+            # This fixes the issue where fetch-depth=1 causes git log --stat
+            # to show ALL files as additions since there's no parent commit
+            deepen_cmd = ['git', 'fetch', '--deepen=10']
+            subprocess.run(
+                deepen_cmd,
+                cwd=self.repo_root,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            # Note: We don't fail if deepen fails - it might already be deep enough
+
             # Get commits with full details
             cmd = [
                 'git', 'log', f'-{limit}',
