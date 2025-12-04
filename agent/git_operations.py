@@ -184,9 +184,12 @@ class GitOperations:
                         raise ValueError("Patch action requires 'diff' field")
 
                     # Write diff to temp file
+                    # CRITICAL: Git patches MUST end with a newline
                     import tempfile
                     with tempfile.NamedTemporaryFile(mode='w', suffix='.patch', delete=False) as f:
                         f.write(diff_content)
+                        if not diff_content.endswith('\n'):
+                            f.write('\n')
                         patch_file = f.name
 
                     try:
