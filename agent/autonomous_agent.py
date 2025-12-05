@@ -84,7 +84,7 @@ class AutonomousAgent:
 
     def __init__(self, config: Optional[AgentConfig] = None, mock_mode: bool = False,
                  mock_llm: bool = None, mock_git: bool = None, build_flavor: str = 'unknown',
-                 run_id: str = None, workflow_name: str = None):
+                 run_id: str = None, workflow_name: str = None, verbosity: int = 10):
         """
         Initialize agent
 
@@ -96,12 +96,19 @@ class AutonomousAgent:
             build_flavor: Build flavor (e.g., Win-nocuda, Linux)
             run_id: GitHub workflow run ID
             workflow_name: GitHub workflow name
+            verbosity: Logging verbosity level (0-30, default 10)
+                      0    = Don't log anything
+                      1-5  = Log turn headers only
+                      6-10 = Also log what LLM sends
+                      11-20= Also log what we send to LLM
+                      21-30= Also log other debugging aspects
         """
         self.config = config or DEFAULT_CONFIG
         self.mock_mode = mock_mode  # Keep for backward compatibility
         self.build_flavor = build_flavor
         self.run_id = run_id
         self.workflow_name = workflow_name
+        self.verbosity = verbosity
 
         # Allow separate control of LLM vs Git mocking
         self.mock_llm = mock_llm if mock_llm is not None else mock_mode
@@ -115,7 +122,8 @@ class AutonomousAgent:
         self.llm = LLMClient(
             api_key=api_key,
             mock_mode=self.mock_llm,
-            config=self.config.model
+            config=self.config.model,
+            verbosity=self.verbosity
         )
 
         self.git = GitOperations(
@@ -877,6 +885,13 @@ def main():
         help='Mock Git operations only'
     )
 
+    parser.add_argument(
+        '--verbosity',
+        type=int,
+        default=10,
+        help='Logging verbosity level (0-30, default=10): 0=none, 1-5=turns, 6-10=+LLM response, 11-20=+prompts, 21-30=+debug'
+    )
+
     args = parser.parse_args()
 
     # Initialize agent with separate mock controls
@@ -890,7 +905,8 @@ def main():
         mock_git=mock_git,
         build_flavor=args.build_flavor or 'unknown',
         run_id=args.run_id,
-        workflow_name=args.workflow_name
+        workflow_name=args.workflow_name,
+        verbosity=args.verbosity
     )
 
     # Run agent

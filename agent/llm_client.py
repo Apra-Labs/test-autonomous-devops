@@ -43,7 +43,8 @@ class LLMClient:
     """
 
     def __init__(self, api_key: Optional[str] = None, mock_mode: bool = False,
-                 config: Optional[ModelConfig] = None, prompts_path: Optional[str] = None):
+                 config: Optional[ModelConfig] = None, prompts_path: Optional[str] = None,
+                 verbosity: int = 10):
         """
         Initialize LLM client
 
@@ -52,9 +53,16 @@ class LLMClient:
             mock_mode: If True, return mock responses without API calls
             config: Model configuration
             prompts_path: Path to prompts.json file (defaults to agent/prompts.json)
+            verbosity: Logging verbosity level (0-30, default 10)
+                      0    = Don't log anything
+                      1-5  = Log turn headers only
+                      6-10 = Also log what LLM sends
+                      11-20= Also log what we send to LLM
+                      21-30= Also log other debugging aspects
         """
         self.mock_mode = mock_mode
         self.config = config or ModelConfig()
+        self.verbosity = verbosity
 
         # Load prompts from JSON file
         if prompts_path is None:
@@ -603,16 +611,22 @@ Applied fix after {attempt_count} attempt(s). The final changeset resolves the i
             )
 
             # Log prompt for review (in both mock and real modes)
-            logger.info(f"\n{'='*80}\n📤 PROMPT TO LLM (Turn {turn}):\n{'='*80}\n{prompt}\n{'='*80}")
+            # Verbosity 11-20: Log what we send to LLM
+            if self.verbosity >= 11:
+                logger.info(f"\n{'='*80}\n📤 PROMPT TO LLM (Turn {turn}):\n{'='*80}\n{prompt}\n{'='*80}")
 
             # Call LLM
             if self.mock_mode:
-                logger.info("🔸 MOCK MODE: Using simulated LLM response (NO API CALL)")
+                # Verbosity 21+: Log debugging info
+                if self.verbosity >= 21:
+                    logger.info("🔸 MOCK MODE: Using simulated LLM response (NO API CALL)")
                 response_json = self._mock_investigation_response(turn, max_turns)
                 tokens = 1000
                 response_text = str(response_json)
             else:
-                logger.warning(f"💰 REAL API CALL: Calling Anthropic API with model {model} - THIS COSTS MONEY!")
+                # Verbosity 21+: Log API call warnings
+                if self.verbosity >= 21:
+                    logger.warning(f"💰 REAL API CALL: Calling Anthropic API with model {model} - THIS COSTS MONEY!")
 
                 template = self.prompts['investigate_failure']
                 response = self.client.messages.create(
@@ -627,38 +641,66 @@ Applied fix after {attempt_count} attempt(s). The final changeset resolves the i
                 tokens = response.usage.input_tokens + response.usage.output_tokens
                 total_tokens += tokens
 
-                logger.warning(f"💰 API CALL COMPLETE: Used {response.usage.input_tokens + response.usage.output_tokens} tokens")
-                logger.info(f"\n{'='*80}\n📥 LLM RESPONSE (Turn {turn}):\n{'='*80}\n{response_text}\n{'='*80}")
+                # Verbosity 21+: Log token usage
+                if self.verbosity >= 21:
+                    logger.warning(f"💰 API CALL COMPLETE: Used {response.usage.input_tokens + response.usage.output_tokens} tokens")
+
+                # Verbosity 6-10: Log what LLM sends
+                if self.verbosity >= 6:
+                    logger.info(f"\n{'='*80}\n📥 LLM RESPONSE (Turn {turn}):\n{'='*80}\n{response_text}\n{'='*80}")
 
                 # Parse JSON response
                 response_json = self._parse_json_response(response_text)
 
-            logger.info(f"Turn {turn}: Action={response_json.get('action')}, Tokens={tokens}")
+            # Verbosity 1-5: Log turn headers only
+            if self.verbosity >= 1:
+                logger.info(f"Turn {turn}: Action={response_json.get('action')}, Tokens={tokens}")
 
             # Check if LLM wants to propose fix
             if response_json.get('action') == 'propose_fix':
                 confidence = response_json.get('confidence', 0.0)
-                logger.info(f"✅ LLM proposes fix with confidence {confidence}")
+                # Verbosity 1+: Log that fix is proposed
+                if self.verbosity >= 1:
+                    logger.info(f"✅ LLM proposes fix with confidence {confidence}")
 
                 if confidence >= self.config.MIN_FIX_CONFIDENCE:
                     # Log the analysis and fix for human review
                     analysis = response_json.get('analysis', {})
                     fix = response_json.get('fix', {})
 
-                    logger.info(f"\n{'='*80}\n🔍 ANALYSIS SUMMARY:\n{'='*80}")
-                    logger.info(f"Root Cause: {analysis.get('root_cause', 'N/A')}")
-                    logger.info(f"Confidence: {confidence}")
-                    logger.info(f"Reasoning: {analysis.get('reasoning', 'N/A')}")
+                    # Verbosity 6+: Log analysis summary
+                    if self.verbosity >= 6:
+                        logger.info(f"\n{'='*80}\n🔍 ANALYSIS SUMMARY:\n{'='*80}")
+                        logger.info(f"Root Cause: {analysis.get('root_cause', 'N/A')}")
+                        logger.info(f"Confidence: {confidence}")
+                        logger.info(f"Reasoning: {analysis.get('reasoning', 'N/A')}")
 
-                    logger.info(f"\n{'='*80}\n🔧 PROPOSED FIX:\n{'='*80}")
-                    logger.info(f"Description: {fix.get('description', 'N/A')}")
-                    logger.info(f"Files to modify: {len(fix.get('file_changes', []))}")
-                    for i, change in enumerate(fix.get('file_changes', []), 1):
-                        logger.info(f"\n  Change {i}:")
-                        logger.info(f"    File: {change.get('file', 'N/A')}")
-                        logger.info(f"    Explanation: {change.get('explanation', 'N/A')}")
-                        logger.info(f"    Content: {change.get('new_content', 'N/A')[:200]}...")
-                    logger.info(f"{'='*80}\n")
+                        logger.info(f"\n{'='*80}\n🔧 PROPOSED FIX:\n{'='*80}")
+                        logger.info(f"Description: {fix.get('description', 'N/A')}")
+                        logger.info(f"Files to modify: {len(fix.get('files_to_change', []))}")
+
+                        # Verbosity 6-10: Show decoded patches
+                        for i, change in enumerate(fix.get('files_to_change', []), 1):
+                            logger.info(f"\n  File {i}: {change.get('path', 'N/A')}")
+                            if change.get('action') == 'patch' and change.get('diff_base64'):
+                                import base64
+                                try:
+                                    decoded_patch = base64.b64decode(change['diff_base64']).decode('utf-8')
+                                    logger.info(f"  Decoded patch:\n{decoded_patch}")
+                                except Exception as e:
+                                    logger.warning(f"  Could not decode patch: {e}")
+
+                    # Verbosity 21+: Log detailed file changes
+                    if self.verbosity >= 21:
+                        for i, change in enumerate(fix.get('files_to_change', []), 1):
+                            logger.info(f"\n  Change {i}:")
+                            logger.info(f"    File: {change.get('path', 'N/A')}")
+                            logger.info(f"    Action: {change.get('action', 'N/A')}")
+                            if 'diff_base64' in change:
+                                logger.info(f"    Base64 patch length: {len(change['diff_base64'])} chars")
+
+                    if self.verbosity >= 6:
+                        logger.info(f"{'='*80}\n")
 
                     # Confidence high enough, return fix
                     return LLMResponse(
@@ -670,7 +712,9 @@ Applied fix after {attempt_count} attempt(s). The final changeset resolves the i
                         tokens_used=total_tokens
                     )
                 else:
-                    logger.warning(f"Confidence {confidence} below threshold {self.config.MIN_FIX_CONFIDENCE}")
+                    # Verbosity 1+: Log confidence threshold issue
+                    if self.verbosity >= 1:
+                        logger.warning(f"Confidence {confidence} below threshold {self.config.MIN_FIX_CONFIDENCE}")
                     # Force another turn to get more context
                     response_json['action'] = 'need_more_context'
                     if 'requests' not in response_json or not response_json['requests']:
@@ -685,17 +729,26 @@ Applied fix after {attempt_count} attempt(s). The final changeset resolves the i
                 requests = response_json.get('requests', [])
 
                 if not requests:
-                    logger.warning("No requests provided, ending investigation")
+                    # Verbosity 1+: Log investigation end
+                    if self.verbosity >= 1:
+                        logger.warning("No requests provided, ending investigation")
                     break
 
-                logger.info(f"\n{'='*80}\n🔎 LLM REQUESTS MORE CONTEXT (Turn {turn}):\n{'='*80}")
-                logger.info(f"Reasoning: {response_json.get('reasoning', 'N/A')}")
-                for i, req in enumerate(requests, 1):
-                    logger.info(f"\n  Request {i}:")
-                    logger.info(f"    Type: {req.get('type', 'N/A')}")
-                    logger.info(f"    Target: {req.get('target', 'N/A')}")
-                    logger.info(f"    Reason: {req.get('reason', 'N/A')}")
-                logger.info(f"{'='*80}\n")
+                # Verbosity 6+: Log context requests
+                if self.verbosity >= 6:
+                    logger.info(f"\n{'='*80}\n🔎 LLM REQUESTS MORE CONTEXT (Turn {turn}):\n{'='*80}")
+                    logger.info(f"Reasoning: {response_json.get('reasoning', 'N/A')}")
+
+                # Verbosity 21+: Log detailed requests
+                if self.verbosity >= 21:
+                    for i, req in enumerate(requests, 1):
+                        logger.info(f"\n  Request {i}:")
+                        logger.info(f"    Type: {req.get('type', 'N/A')}")
+                        logger.info(f"    Target: {req.get('target', 'N/A')}")
+                        logger.info(f"    Reason: {req.get('reason', 'N/A')}")
+
+                if self.verbosity >= 6:
+                    logger.info(f"{'='*80}\n")
 
                 # Fetch requested context
                 fulfilled = context_fetcher.fetch_requests(requests)
