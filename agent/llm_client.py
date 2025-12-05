@@ -71,7 +71,10 @@ class LLMClient:
             prompts_path = os.path.join(script_dir, 'prompts.json')
 
         self.prompts = self._load_prompts(prompts_path)
-        logger.info(f"Loaded prompts from {prompts_path}")
+
+        # Verbosity 21+: Log initialization details
+        if self.verbosity >= 21:
+            logger.info(f"Loaded prompts from {prompts_path}")
 
         if not mock_mode:
             if not api_key:
@@ -81,7 +84,9 @@ class LLMClient:
             self.client = Anthropic(api_key=api_key)
         else:
             self.client = None
-            logger.info("LLM Client initialized in MOCK MODE")
+            # Verbosity 21+: Log mock mode
+            if self.verbosity >= 21:
+                logger.info("LLM Client initialized in MOCK MODE")
 
     def _load_prompts(self, path: str) -> Dict:
         """
@@ -96,7 +101,7 @@ class LLMClient:
         try:
             with open(path, 'r') as f:
                 prompts = json.load(f)
-                logger.info(f"Loaded {len(prompts)} prompt templates")
+                # Don't log during init - verbosity not set yet
                 return prompts
         except FileNotFoundError:
             logger.error(f"Prompts file not found: {path}")
@@ -590,13 +595,18 @@ Applied fix after {attempt_count} attempt(s). The final changeset resolves the i
             LLMResponse with final fix proposal
         """
         model = self.config.get_model_for_attempt(attempt)
-        logger.info(f"Starting iterative investigation with {model} (max {max_turns} turns)")
+
+        # Verbosity 21+: Log investigation start
+        if self.verbosity >= 21:
+            logger.info(f"Starting iterative investigation with {model} (max {max_turns} turns)")
 
         conversation_history = []
         total_tokens = 0
 
         for turn in range(1, max_turns + 1):
-            logger.info(f"Investigation turn {turn}/{max_turns}")
+            # Verbosity 21+: Log turn progress
+            if self.verbosity >= 21:
+                logger.info(f"Investigation turn {turn}/{max_turns}")
 
             # Build prompt with current context
             prompt = self._build_investigation_prompt(
