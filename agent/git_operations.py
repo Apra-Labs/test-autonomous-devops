@@ -203,10 +203,12 @@ class GitOperations:
 
                     try:
                         # Try git apply first (check only)
-                        result = self.git_repo.git.apply('--check', patch_file)
+                        # Use --recount to recalculate line counts from actual patch content
+                        # This handles LLM-generated patches with incorrect hunk headers
+                        result = self.git_repo.git.apply('--recount', '--check', patch_file)
 
                         # If check passes, actually apply
-                        self.git_repo.git.apply(patch_file)
+                        self.git_repo.git.apply('--recount', patch_file)
                         self.git_repo.git.add(path)
 
                         logger.info(f"Applied patch to {path} successfully")
